@@ -14,40 +14,33 @@ import re
 st.set_page_config(page_title="스텐트 성능 분석", layout="wide")
 st.title("📊 스텐트 자동 분석 대시보드 (스마트 판정 및 알람)")
 
-# 불량 데이터 발생 시 칠해줄 핑크색 지정
 pink_fill = PatternFill(start_color="FFC0CB", end_color="FFC0CB", fill_type="solid")
 
 # ---------------------------------------------------------
-# 기준(criteria) 부등호 및 양측범위(~) 판독 함수
+# 성능 시험용 - 부등호 및 양측범위(~) 판독 함수
 # ---------------------------------------------------------
 def parse_criteria(crit_str):
     if crit_str is None: return "<=", 0.0
     crit_str = str(crit_str).replace(',', '').strip()
     
-    # 1. 양측 공차 확인 ('~' 기호가 포함된 경우)
     if '~' in crit_str:
         parts = crit_str.split('~')
         if len(parts) == 2:
             try:
-                lower = float(parts[0].strip())
-                upper = float(parts[1].strip())
-                return "~", (lower, upper)
+                return "~", (float(parts[0].strip()), float(parts[1].strip()))
             except ValueError:
                 pass
                 
-    # 2. 단측 공차 확인 (부등호 포함된 경우)
     match = re.match(r"([<>]=?)\s*([\d\.]+)", crit_str)
     if match:
         return match.group(1), float(match.group(2))
     
-    # 3. 부등호 없이 숫자만 적혀있다면 기본적으로 '<=' (이하)로 간주
     try:
         return "<=", float(crit_str)
     except ValueError:
         return "<=", 0.0
 
 def check_data_pass(value, operator, limit):
-    # 개별 데이터가 기준을 통과했는지 체크
     if operator == '~': return limit[0] <= value <= limit[1]
     if operator == '<=': return value <= limit
     if operator == '<': return value < limit
@@ -110,21 +103,12 @@ def create_minitab_plot(data, model_name):
         f"{'P-Value':<15} {p_val_ad:.3f}\n\n"
         f"{'Mean':<15} {mean:.1f}\n"
         f"{'StDev':<15} {std:.1f}\n"
-        f"{'Variance':<15} {var:.1f}\n"
-        f"{'Skewness':<15} {skew:.5f}\n"
-        f"{'Kurtosis':<15} {kurt:.5f}\n"
         f"{'N':<15} {n}\n\n"
         f"{'Minimum':<15} {minimum:.1f}\n"
         f"{'1st Quartile':<15} {q1:.1f}\n"
         f"{'Median':<15} {median:.1f}\n"
         f"{'3rd Quartile':<15} {q3:.1f}\n"
-        f"{'Maximum':<15} {maximum:.1f}\n\n"
-        f"95% CI for Mean\n"
-        f"{ci_mean[0]:.1f}      {ci_mean[1]:.1f}\n\n"
-        f"95% CI for Median\n"
-        f"{ci_median[0]:.1f}      {ci_median[1]:.1f}\n\n"
-        f"95% CI for StDev\n"
-        f"{ci_std[0]:.1f}      {ci_std[1]:.1f}"
+        f"{'Maximum':<15} {maximum:.1f}\n"
     )
     ax4.text(0.1, 0.95, stats_text, va='top', ha='left', fontsize=9, family='monospace')
     plt.tight_layout()
@@ -144,20 +128,13 @@ if uploaded_file is not None:
     wb = openpyxl.load_workbook(uploaded_file)
     ws = wb.active
     
-    # D2(단측), E2(양측) K값 불러오기
     try:
         k_val_one = float(ws['D2'].value)
-    except:
-        st.error("⚠ D2 셀에서 단측 K값을 읽을 수 없습니다.")
-        st.stop()
-        
-    try:
         k_val_two = float(ws['E2'].value)
     except:
-        st.error("⚠ E2 셀에서 양측 K값을 읽을 수 없습니다. 양식을 확인해 주세요.")
-        st.stop()
+        st.warning("⚠ D2(단측) 또는 E2(양측) 셀에 K값이 비어있을 수 있습니다. 성능 시험이 포함된 경우 에러가 발생할 수 있습니다.")
+        k_val_one, k_val_two = 0.0, 0.0
         
-    # A열에서 '평균' 셀을 기준으로 블록(세부 묶음) 탐색
     blocks = []
     for r in range(1, ws.max_row + 15):
         cell_val = ws.cell(row=r, column=1).value
@@ -176,9 +153,8 @@ if uploaded_file is not None:
         st.error("⚠️ A열에 '평균'이 포함되어 있는지 확인하세요.")
         st.stop()
         
-    st.success(f"✅ 총 **{len(blocks)}개** 세부 묶음 스캔 완료! (단측K: {k_val_one} / 양측K: {k_val_two})")
+    st.success(f"✅ 총 **{len(blocks)}개** 세부 묶음 스캔 완료!")
     
-    # 찾아낸 각각의 블록별 계산 및 핑크색 알람 적용
     for idx, block in enumerate(blocks):
         mean_row = block['mean_row']
         header_row = block['header_row']
@@ -189,88 +165,140 @@ if uploaded_file is not None:
             last_col += 1
         last_col -= 1
         
-        st.markdown(f"### 🧪 {idx+1}번 묶음: `{test_name}`")
+        # [핵심] 치수 시험 vs 성능 시험 자동 판별 (A열에 K값 유무 확인)
+        is_dimensional = True
+        crit_row = None
+        for r in range(mean_row, mean_row + 6):
+            c_val = ws.cell(row=r, column=1).value
+            if c_val is not None:
+                c_str = str(c_val).replace(" ", "").lower()
+                if "criteria" in c_str:
+                    crit_row = r
+                if "k값" in c_str or "p값" in c_str:
+                    is_dimensional = False
+                    
+        if crit_row is None:
+            crit_row = mean_row + 4 # 기본값
+
+        mode_text = "📏 치수 시험 모드" if is_dimensional else "📈 성능 시험 모드"
+        st.markdown(f"### 🧪 {idx+1}번 묶음: `{test_name}` ({mode_text})")
         cols = st.columns(max(1, last_col - 1))
         col_idx = 0
-        
         img_insert_col = max(7, last_col + 2)
         
         for col in range(2, last_col + 1):
             model_name = ws.cell(row=header_row, column=col).value
             if not model_name: continue
                 
-            raw_criteria = ws.cell(row=mean_row+4, column=col).value
-            operator, limit = parse_criteria(raw_criteria)
+            raw_criteria = ws.cell(row=crit_row, column=col).value
             
+            # 원본 데이터 수집
+            data_cells = []
             data = []
             for dr in range(header_row + 1, mean_row):
                 d_val = ws.cell(row=dr, column=col).value
                 if d_val is not None:
                     val_float = float(str(d_val).replace(',', ''))
                     data.append(val_float)
-                    
-                    if not check_data_pass(val_float, operator, limit):
-                        ws.cell(row=dr, column=col).fill = pink_fill
+                    data_cells.append((dr, val_float))
                     
             if not data: continue
                 
             mean_val = np.mean(data)
             std_val = np.std(data, ddof=1)
-            stat, p_val = normal_ad(np.array(data))
             
-            # [핵심 로직] 양측 vs 단측 판별 및 K값/공식 적용
-            if operator == '~':
-                # 양측 공차 계산 (E2의 k_val_two 사용)
-                ltl = mean_val - (k_val_two * std_val)
-                utl = mean_val + (k_val_two * std_val)
-                bound_text = f"{round(ltl, 2)} ~ {round(utl, 2)}"
-                is_pass = (ltl >= limit[0]) and (utl <= limit[1])
-                limit_text = f"{limit[0]} ~ {limit[1]}"
-            else:
-                # 단측 공차 계산 (D2의 k_val_one 사용)
-                if operator in ['<=', '<']:
-                    bound_val = mean_val + (k_val_one * std_val)
-                else:
-                    bound_val = mean_val - (k_val_one * std_val)
-                bound_text = round(bound_val, 2)
-                is_pass = check_data_pass(bound_val, operator, limit)
-                limit_text = f"{operator} {limit}"
-            
-            # 엑셀에 결과 기록
-            ws.cell(row=mean_row, column=col).value = round(mean_val, 2)
-            ws.cell(row=mean_row+1, column=col).value = round(std_val, 2)
-            
-            cell_k = ws.cell(row=mean_row+2, column=col)
-            cell_k.value = bound_text
-            if not is_pass:
-                cell_k.fill = pink_fill
-                
-            cell_p = ws.cell(row=mean_row+3, column=col)
-            cell_p.value = round(p_val, 3)
-            if p_val <= 0.05:
-                cell_p.fill = pink_fill
+            if is_dimensional:
+                # -----------------------------------------------------
+                # 치수 시험 모드: 타겟값과 %허용오차를 계산하여 불량만 판별
+                # -----------------------------------------------------
+                try:
+                    base_val = float(str(raw_criteria).replace(',', ''))
+                except:
+                    base_val = 0.0
                     
-            # 그래프 생성 및 삽입
-            fig, img_buffer = create_minitab_plot(np.array(data), model_name)
-            img = OpenpyxlImage(img_buffer)
-            img.width = int(9.6 * 37.8)
-            img.height = int(6.2 * 37.8)
-            
-            c_letter = get_column_letter(img_insert_col)
-            ws.add_image(img, f"{c_letter}{header_row}")
-            img_insert_col += 6
-            
-            # 웹 화면 출력
-            with cols[col_idx % len(cols)]:
-                st.write(f"**{model_name}**")
-                if is_pass:
-                    st.success(f"✅ 통과 ({bound_text} | 기준: {limit_text})")
+                pct_val = ws.cell(row=crit_row+1, column=col).value
+                pct_float = 0.0
+                if isinstance(pct_val, str) and '%' in pct_val:
+                    pct_float = float(pct_val.replace('%', '')) / 100.0
+                elif isinstance(pct_val, (int, float)):
+                    if pct_val > 1: pct_float = pct_val / 100.0
+                    else: pct_float = float(pct_val)
+                    
+                lower_limit = base_val * (1 - pct_float)
+                upper_limit = base_val * (1 + pct_float)
+                
+                failed_count = 0
+                for dr, val_float in data_cells:
+                    if not (lower_limit <= val_float <= upper_limit):
+                        ws.cell(row=dr, column=col).fill = pink_fill
+                        failed_count += 1
+                        
+                ws.cell(row=mean_row, column=col).value = round(mean_val, 2)
+                ws.cell(row=mean_row+1, column=col).value = round(std_val, 2)
+                
+                with cols[col_idx % len(cols)]:
+                    st.write(f"**{model_name}**")
+                    limit_text = f"기준: {round(lower_limit, 2)} ~ {round(upper_limit, 2)}"
+                    if failed_count > 0:
+                        st.error(f"❌ 불량 {failed_count}건 발생\n\n{limit_text}")
+                    else:
+                        st.success(f"✅ 전수 통과\n\n{limit_text}")
+                
+            else:
+                # -----------------------------------------------------
+                # 성능 시험 모드: UTL/LTL 계산 및 미니탭 그래프 출력
+                # -----------------------------------------------------
+                operator, limit = parse_criteria(raw_criteria)
+                
+                for dr, val_float in data_cells:
+                    if not check_data_pass(val_float, operator, limit):
+                        ws.cell(row=dr, column=col).fill = pink_fill
+                        
+                stat, p_val = normal_ad(np.array(data))
+                
+                if operator == '~':
+                    ltl = mean_val - (k_val_two * std_val)
+                    utl = mean_val + (k_val_two * std_val)
+                    bound_text = f"{round(ltl, 2)} ~ {round(utl, 2)}"
+                    is_pass = (ltl >= limit[0]) and (utl <= limit[1])
+                    limit_text = f"{limit[0]} ~ {limit[1]}"
                 else:
-                    st.error(f"❌ 불합격 ({bound_text} 🚫 기준: {limit_text})")
-                st.pyplot(fig)
-            
+                    if operator in ['<=', '<']:
+                        bound_val = mean_val + (k_val_one * std_val)
+                    else:
+                        bound_val = mean_val - (k_val_one * std_val)
+                    bound_text = round(bound_val, 2)
+                    is_pass = check_data_pass(bound_val, operator, limit)
+                    limit_text = f"{operator} {limit}"
+                
+                ws.cell(row=mean_row, column=col).value = round(mean_val, 2)
+                ws.cell(row=mean_row+1, column=col).value = round(std_val, 2)
+                
+                cell_k = ws.cell(row=mean_row+2, column=col)
+                cell_k.value = bound_text
+                if not is_pass: cell_k.fill = pink_fill
+                    
+                cell_p = ws.cell(row=mean_row+3, column=col)
+                cell_p.value = round(p_val, 3)
+                if p_val <= 0.05: cell_p.fill = pink_fill
+                        
+                fig, img_buffer = create_minitab_plot(np.array(data), model_name)
+                img = OpenpyxlImage(img_buffer)
+                img.width = int(9.6 * 37.8)
+                img.height = int(6.2 * 37.8)
+                
+                c_letter = get_column_letter(img_insert_col)
+                ws.add_image(img, f"{c_letter}{header_row}")
+                img_insert_col += 6
+                
+                with cols[col_idx % len(cols)]:
+                    st.write(f"**{model_name}**")
+                    if is_pass: st.success(f"✅ 통과 ({bound_text} | 기준: {limit_text})")
+                    else: st.error(f"❌ 불합격 ({bound_text} 🚫 기준: {limit_text})")
+                    st.pyplot(fig)
+                plt.close(fig)
+                
             col_idx += 1
-            plt.close(fig)
             
         st.divider()
 
@@ -278,10 +306,10 @@ if uploaded_file is not None:
     wb.save(excel_buffer)
     excel_buffer.seek(0)
 
-    st.subheader("🎉 분석 및 핑크색QC 음영 표시 완료!")
+    st.subheader("🎉 통합 분석 완료!")
     st.download_button(
-        label="📥 [통합본] 핑크색 알람 엑셀 다운로드",
+        label="📥 결과 엑셀 다운로드 (스마트 판정 적용)",
         data=excel_buffer,
-        file_name="스텐트_전체성능분석_완료(알람적용).xlsx",
+        file_name="스텐트_전체성능분석_완료.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
