@@ -18,7 +18,7 @@ st.title("📊 스텐트 자동 분석 & 데이터 생성 대시보드")
 tab1, tab2 = st.tabs(["📊 데이터 분석기", "🎲 임의 데이터 생성기"])
 
 # =========================================================
-# 탭 1: 기존 분석기 코드 (평균값 합격 판정 추가)
+# 탭 1: 기존 분석기 코드 (대분류 시험명 기준 그룹핑 적용)
 # =========================================================
 with tab1:
     pink_fill = PatternFill(start_color="FFC0CB", end_color="FFC0CB", fill_type="solid")
@@ -129,193 +129,226 @@ with tab1:
             k_val_one, k_val_two = 0.0, 0.0
             
         blocks = []
+        current_main_name = "미지정 시험" # 메인 시험명 추적용
+        
         for r in range(1, ws.max_row + 15):
-            cell_val = ws.cell(row=r, column=1).value
-            if isinstance(cell_val, str) and cell_val.strip() == "평균":
-                header_row = r - 1
-                while header_row > 1:
-                    h_val = ws.cell(row=header_row, column=1).value
-                    if h_val is not None:
-                        h_str = str(h_val).strip()
-                        if not h_str.replace('.', '', 1).isdigit():
-                            break
-                    header_row -= 1
-                blocks.append({'mean_row': r, 'header_row': header_row})
+            c_val = ws.cell(row=r, column=1).value
+            b_val = ws.cell(row=r, column=2).value
+            
+            if isinstance(c_val, str):
+                c_str = c_val.strip()
+                
+                # 1. 메인 시험명(대분류) 자동 추적 로직
+                # B열이 비어있고, 일반적인 통계 용어가 아닌 경우 대분류명으로 인식
+                if b_val is None and c_str and c_str not in ["평균", "표준편차", "criteria", "K값", "p값", "BTR", "2A", "2R"]:
+                    if re.match(r'^\d+[\.\)]', c_str): # "1. " 형태면 무조건 메인 제목 갱신
+                        current_main_name = c_str
+                    else: # 숫자가 없더라도 부제목(예: Body Diameter)이면 뒤에 이어붙임
+                        if current_main_name != "미지정 시험" and not current_main_name.endswith(c_str):
+                            current_main_name = f"{current_main_name} - {c_str}"
+                        elif current_main_name == "미지정 시험":
+                            current_main_name = c_str
+                            
+                # 2. 서브 데이터 묶음(BTR, 2A 등) 탐색 로직
+                if c_str == "평균":
+                    header_row = r - 1
+                    while header_row > 1:
+                        h_val = ws.cell(row=header_row, column=1).value
+                        if h_val is not None:
+                            h_str = str(h_val).strip()
+                            if not h_str.replace('.', '', 1).isdigit():
+                                break
+                        header_row -= 1
+                    
+                    blocks.append({
+                        'main_test_name': current_main_name,
+                        'mean_row': r,
+                        'header_row': header_row
+                    })
                 
         if not blocks:
             st.error("⚠️ A열에 '평균'이 포함되어 있는지 확인하세요.")
         else:
-            st.success(f"✅ 총 **{len(blocks)}개** 세부 묶음 스캔 완료!")
+            # 추출된 블록들을 대분류(main_test_name) 기준으로 묶어주기 (Grouping)
+            grouped_blocks = {}
+            for block in blocks:
+                m_name = block['main_test_name']
+                if m_name not in grouped_blocks:
+                    grouped_blocks[m_name] = []
+                grouped_blocks[m_name].append(block)
+                
+            st.success(f"✅ 총 **{len(grouped_blocks)}개**의 시험 항목(대분류)과 **{len(blocks)}개**의 세부 묶음 스캔 완료!")
             
-            for idx, block in enumerate(blocks):
-                mean_row = block['mean_row']
-                header_row = block['header_row']
-                test_name = str(ws.cell(row=header_row, column=1).value)
+            # 대분류별로 묶어서 화면에 깔끔하게 출력
+            for main_name, sub_blocks in grouped_blocks.items():
+                st.markdown(f"## 📌 {main_name}") # 큰 제목 (예: 1. Deployment force)
                 
-                last_col = 2
-                while ws.cell(row=header_row, column=last_col).value is not None:
-                    last_col += 1
-                last_col -= 1
-                
-                is_dimensional = True
-                crit_row = None
-                for r in range(mean_row, mean_row + 6):
-                    c_val = ws.cell(row=r, column=1).value
-                    if c_val is not None:
-                        c_str = str(c_val).replace(" ", "").lower()
-                        if "criteria" in c_str:
-                            crit_row = r
-                        if "k값" in c_str or "p값" in c_str:
-                            is_dimensional = False
-                            
-                if crit_row is None:
-                    crit_row = mean_row + 4 
+                for block in sub_blocks:
+                    mean_row = block['mean_row']
+                    header_row = block['header_row']
+                    test_name = str(ws.cell(row=header_row, column=1).value) # 서브 제목 (예: BTR)
+                    
+                    last_col = 2
+                    while ws.cell(row=header_row, column=last_col).value is not None:
+                        last_col += 1
+                    last_col -= 1
+                    
+                    is_dimensional = True
+                    crit_row = None
+                    for r in range(mean_row, mean_row + 6):
+                        c_val = ws.cell(row=r, column=1).value
+                        if c_val is not None:
+                            c_str = str(c_val).replace(" ", "").lower()
+                            if "criteria" in c_str:
+                                crit_row = r
+                            if "k값" in c_str or "p값" in c_str:
+                                is_dimensional = False
+                                
+                    if crit_row is None:
+                        crit_row = mean_row + 4 
 
-                mode_text = "📏 치수 시험 모드" if is_dimensional else "📈 성능 시험 모드"
-                st.markdown(f"### 🧪 {idx+1}번 묶음: `{test_name}` ({mode_text})")
-                cols = st.columns(max(1, last_col - 1))
-                col_idx = 0
-                img_insert_col = max(7, last_col + 2)
-                
-                for col in range(2, last_col + 1):
-                    model_name = ws.cell(row=header_row, column=col).value
-                    if not model_name: continue
-                        
-                    raw_criteria = ws.cell(row=crit_row, column=col).value
+                    mode_text = "📏 치수 시험" if is_dimensional else "📈 성능 시험"
+                    st.markdown(f"#### ↳ 🧪 {test_name} ({mode_text})")
                     
-                    data_cells = []
-                    data = []
-                    for dr in range(header_row + 1, mean_row):
-                        d_val = ws.cell(row=dr, column=col).value
-                        if d_val is not None:
-                            val_float = float(str(d_val).replace(',', ''))
-                            data.append(val_float)
-                            data_cells.append((dr, val_float))
-                            
-                    if not data: continue
-                        
-                    mean_val = np.mean(data)
-                    std_val = np.std(data, ddof=1)
+                    cols = st.columns(max(1, last_col - 1))
+                    col_idx = 0
+                    img_insert_col = max(7, last_col + 2)
                     
-                    if is_dimensional:
-                        try:
-                            base_val = float(str(raw_criteria).replace(',', ''))
-                        except:
-                            base_val = 0.0
+                    for col in range(2, last_col + 1):
+                        model_name = ws.cell(row=header_row, column=col).value
+                        if not model_name: continue
                             
-                        pct_val = ws.cell(row=crit_row+1, column=col).value
-                        pct_float = 0.0
-                        if isinstance(pct_val, str) and '%' in pct_val:
-                            pct_float = float(pct_val.replace('%', '')) / 100.0
-                        elif isinstance(pct_val, (int, float)):
-                            if pct_val > 1: pct_float = pct_val / 100.0
-                            else: pct_float = float(pct_val)
+                        raw_criteria = ws.cell(row=crit_row, column=col).value
+                        
+                        data_cells = []
+                        data = []
+                        for dr in range(header_row + 1, mean_row):
+                            d_val = ws.cell(row=dr, column=col).value
+                            if d_val is not None:
+                                val_float = float(str(d_val).replace(',', ''))
+                                data.append(val_float)
+                                data_cells.append((dr, val_float))
+                                
+                        if not data: continue
                             
-                        lower_limit = base_val * (1 - pct_float)
-                        upper_limit = base_val * (1 + pct_float)
+                        mean_val = np.mean(data)
+                        std_val = np.std(data, ddof=1)
                         
-                        failed_count = 0
-                        for dr, val_float in data_cells:
-                            if not (lower_limit <= val_float <= upper_limit):
-                                ws.cell(row=dr, column=col).fill = pink_fill
-                                failed_count += 1
+                        if is_dimensional:
+                            try:
+                                base_val = float(str(raw_criteria).replace(',', ''))
+                            except:
+                                base_val = 0.0
                                 
-                        # 평균값 엑셀 입력 및 핑크색 알람 처리
-                        mean_cell = ws.cell(row=mean_row, column=col)
-                        mean_cell.value = round(mean_val, 2)
-                        is_mean_pass = (lower_limit <= mean_val <= upper_limit)
-                        if not is_mean_pass:
-                            mean_cell.fill = pink_fill
+                            pct_val = ws.cell(row=crit_row+1, column=col).value
+                            pct_float = 0.0
+                            if isinstance(pct_val, str) and '%' in pct_val:
+                                pct_float = float(pct_val.replace('%', '')) / 100.0
+                            elif isinstance(pct_val, (int, float)):
+                                if pct_val > 1: pct_float = pct_val / 100.0
+                                else: pct_float = float(pct_val)
+                                
+                            lower_limit = base_val * (1 - pct_float)
+                            upper_limit = base_val * (1 + pct_float)
                             
-                        ws.cell(row=mean_row+1, column=col).value = round(std_val, 2)
-                        
-                        # [치수 시험] 웹 화면 출력 업데이트 (평균 합격 여부 추가)
-                        with cols[col_idx % len(cols)]:
-                            st.markdown(f"**{model_name}**")
-                            if is_mean_pass:
-                                st.write(f"✅ **평균:** {round(mean_val, 2)}")
-                            else:
-                                st.write(f"❌ **평균 미달:** {round(mean_val, 2)}")
+                            failed_count = 0
+                            for dr, val_float in data_cells:
+                                if not (lower_limit <= val_float <= upper_limit):
+                                    ws.cell(row=dr, column=col).fill = pink_fill
+                                    failed_count += 1
+                                    
+                            mean_cell = ws.cell(row=mean_row, column=col)
+                            mean_cell.value = round(mean_val, 2)
+                            is_mean_pass = (lower_limit <= mean_val <= upper_limit)
+                            if not is_mean_pass:
+                                mean_cell.fill = pink_fill
                                 
-                            limit_text = f"기준: {round(lower_limit, 2)} ~ {round(upper_limit, 2)}"
-                            if failed_count > 0:
-                                st.error(f"❌ 불량 {failed_count}건 발생 ({limit_text})")
-                            else:
-                                st.success(f"✅ 전수 통과 ({limit_text})")
-                        
-                    else:
-                        operator, limit = parse_criteria(raw_criteria)
-                        
-                        for dr, val_float in data_cells:
-                            if not check_data_pass(val_float, operator, limit):
-                                ws.cell(row=dr, column=col).fill = pink_fill
-                                
-                        stat, p_val = normal_ad(np.array(data))
-                        
-                        if operator == '~':
-                            ltl = mean_val - (k_val_two * std_val)
-                            utl = mean_val + (k_val_two * std_val)
-                            bound_text = f"{round(ltl, 2)} ~ {round(utl, 2)}"
-                            is_pass = (ltl >= limit[0]) and (utl <= limit[1])
-                            limit_text = f"{limit[0]} ~ {limit[1]}"
+                            ws.cell(row=mean_row+1, column=col).value = round(std_val, 2)
+                            
+                            with cols[col_idx % len(cols)]:
+                                st.markdown(f"**{model_name}**")
+                                if is_mean_pass:
+                                    st.write(f"✅ **평균:** {round(mean_val, 2)}")
+                                else:
+                                    st.write(f"❌ **평균 미달:** {round(mean_val, 2)}")
+                                    
+                                limit_text = f"기준: {round(lower_limit, 2)} ~ {round(upper_limit, 2)}"
+                                if failed_count > 0:
+                                    st.error(f"❌ 불량 {failed_count}건 발생 ({limit_text})")
+                                else:
+                                    st.success(f"✅ 전수 통과 ({limit_text})")
+                            
                         else:
-                            if operator in ['<=', '<']:
-                                bound_val = mean_val + (k_val_one * std_val)
-                            else:
-                                bound_val = mean_val - (k_val_one * std_val)
-                            bound_text = round(bound_val, 2)
-                            is_pass = check_data_pass(bound_val, operator, limit)
-                            limit_text = f"{operator} {limit}"
-                        
-                        # 평균값 엑셀 입력 및 핑크색 알람 처리
-                        mean_cell = ws.cell(row=mean_row, column=col)
-                        mean_cell.value = round(mean_val, 2)
-                        is_mean_pass = check_data_pass(mean_val, operator, limit)
-                        if not is_mean_pass:
-                            mean_cell.fill = pink_fill
+                            operator, limit = parse_criteria(raw_criteria)
                             
-                        ws.cell(row=mean_row+1, column=col).value = round(std_val, 2)
-                        
-                        cell_k = ws.cell(row=mean_row+2, column=col)
-                        cell_k.value = bound_text
-                        if not is_pass: cell_k.fill = pink_fill
+                            for dr, val_float in data_cells:
+                                if not check_data_pass(val_float, operator, limit):
+                                    ws.cell(row=dr, column=col).fill = pink_fill
+                                    
+                            stat, p_val = normal_ad(np.array(data))
                             
-                        cell_p = ws.cell(row=mean_row+3, column=col)
-                        cell_p.value = round(p_val, 3)
-                        if p_val <= 0.05: cell_p.fill = pink_fill
-                                
-                        fig, img_buffer = create_minitab_plot(np.array(data), model_name)
-                        img = OpenpyxlImage(img_buffer)
-                        img.width = int(9.6 * 37.8)
-                        img.height = int(6.2 * 37.8)
-                        
-                        c_letter = get_column_letter(img_insert_col)
-                        ws.add_image(img, f"{c_letter}{header_row}")
-                        img_insert_col += 6
-                        
-                        # [성능 시험] 웹 화면 출력 업데이트 (평균 합격 여부 추가)
-                        with cols[col_idx % len(cols)]:
-                            st.markdown(f"**{model_name}**")
-                            if is_mean_pass:
-                                st.write(f"✅ **평균:** {round(mean_val, 2)}")
+                            if operator == '~':
+                                ltl = mean_val - (k_val_two * std_val)
+                                utl = mean_val + (k_val_two * std_val)
+                                bound_text = f"{round(ltl, 2)} ~ {round(utl, 2)}"
+                                is_pass = (ltl >= limit[0]) and (utl <= limit[1])
+                                limit_text = f"{limit[0]} ~ {limit[1]}"
                             else:
-                                st.write(f"❌ **평균 불합격:** {round(mean_val, 2)}")
+                                if operator in ['<=', '<']:
+                                    bound_val = mean_val + (k_val_one * std_val)
+                                else:
+                                    bound_val = mean_val - (k_val_one * std_val)
+                                bound_text = round(bound_val, 2)
+                                is_pass = check_data_pass(bound_val, operator, limit)
+                                limit_text = f"{operator} {limit}"
                             
-                            if is_pass:
-                                st.success(f"✅ **K값:** {bound_text} (기준: {limit_text})")
-                            else:
-                                st.error(f"❌ **K값 불합격:** {bound_text} (기준: {limit_text})")
+                            mean_cell = ws.cell(row=mean_row, column=col)
+                            mean_cell.value = round(mean_val, 2)
+                            is_mean_pass = check_data_pass(mean_val, operator, limit)
+                            if not is_mean_pass:
+                                mean_cell.fill = pink_fill
                                 
-                            if p_val > 0.05:
-                                st.info(f"✅ **p-value:** {round(p_val, 3)} (정규성 만족)")
-                            else:
-                                st.warning(f"❌ **p-value:** {round(p_val, 3)} (정규성 불만족)")
+                            ws.cell(row=mean_row+1, column=col).value = round(std_val, 2)
+                            
+                            cell_k = ws.cell(row=mean_row+2, column=col)
+                            cell_k.value = bound_text
+                            if not is_pass: cell_k.fill = pink_fill
                                 
-                        plt.close(fig) 
+                            cell_p = ws.cell(row=mean_row+3, column=col)
+                            cell_p.value = round(p_val, 3)
+                            if p_val <= 0.05: cell_p.fill = pink_fill
+                                    
+                            fig, img_buffer = create_minitab_plot(np.array(data), model_name)
+                            img = OpenpyxlImage(img_buffer)
+                            img.width = int(9.6 * 37.8)
+                            img.height = int(6.2 * 37.8)
+                            
+                            c_letter = get_column_letter(img_insert_col)
+                            ws.add_image(img, f"{c_letter}{header_row}")
+                            img_insert_col += 6
+                            
+                            with cols[col_idx % len(cols)]:
+                                st.markdown(f"**{model_name}**")
+                                if is_mean_pass:
+                                    st.write(f"✅ **평균:** {round(mean_val, 2)}")
+                                else:
+                                    st.write(f"❌ **평균 불합격:** {round(mean_val, 2)}")
+                                
+                                if is_pass:
+                                    st.success(f"✅ **K값:** {bound_text} (기준: {limit_text})")
+                                else:
+                                    st.error(f"❌ **K값 불합격:** {bound_text} (기준: {limit_text})")
+                                    
+                                if p_val > 0.05:
+                                    st.info(f"✅ **p-value:** {round(p_val, 3)} (정규성 만족)")
+                                else:
+                                    st.warning(f"❌ **p-value:** {round(p_val, 3)} (정규성 불만족)")
+                                    
+                            plt.close(fig) 
+                            
+                        col_idx += 1
                         
-                    col_idx += 1
-                    
-                st.divider()
+                st.divider() # 대분류 시험(1. Deployment force 등) 하나가 끝날 때마다 구분선 추가
 
             excel_buffer = io.BytesIO()
             wb.save(excel_buffer)
