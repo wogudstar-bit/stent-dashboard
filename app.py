@@ -4,7 +4,7 @@ from openpyxl.drawing.image import Image as OpenpyxlImage
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import PatternFill
 import numpy as np
-import pandas as pd # [추가] 엑셀 데이터프레임 생성을 위한 도구
+import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import scipy.stats as stats
@@ -15,13 +15,10 @@ import re
 st.set_page_config(page_title="스텐트 성능 분석", layout="wide")
 st.title("📊 스텐트 자동 분석 & 데이터 생성 대시보드")
 
-# ---------------------------------------------------------
-# 상단 탭(Tab) 생성
-# ---------------------------------------------------------
-tab1, tab2 = st.tabs(["📊 데이터 분석기 (기존 기능)", "🎲 임의 데이터 생성기 (신규 기능)"])
+tab1, tab2 = st.tabs(["📊 데이터 분석기", "🎲 임의 데이터 생성기"])
 
 # =========================================================
-# 탭 1: 기존 분석기 코드
+# 탭 1: 기존 분석기 코드 (화면 UI 개선 및 그래프 생략 적용)
 # =========================================================
 with tab1:
     pink_fill = PatternFill(start_color="FFC0CB", end_color="FFC0CB", fill_type="solid")
@@ -226,13 +223,15 @@ with tab1:
                         ws.cell(row=mean_row, column=col).value = round(mean_val, 2)
                         ws.cell(row=mean_row+1, column=col).value = round(std_val, 2)
                         
+                        # [치수 시험] 웹 화면 출력 업데이트 (그래프 생략)
                         with cols[col_idx % len(cols)]:
-                            st.write(f"**{model_name}**")
+                            st.markdown(f"**{model_name}**")
+                            st.write(f"- **평균:** {round(mean_val, 2)}")
                             limit_text = f"기준: {round(lower_limit, 2)} ~ {round(upper_limit, 2)}"
                             if failed_count > 0:
-                                st.error(f"❌ 불량 {failed_count}건 발생\n\n{limit_text}")
+                                st.error(f"❌ 불량 {failed_count}건 발생 ({limit_text})")
                             else:
-                                st.success(f"✅ 전수 통과\n\n{limit_text}")
+                                st.success(f"✅ 전수 통과 ({limit_text})")
                         
                     else:
                         operator, limit = parse_criteria(raw_criteria)
@@ -278,12 +277,22 @@ with tab1:
                         ws.add_image(img, f"{c_letter}{header_row}")
                         img_insert_col += 6
                         
+                        # [성능 시험] 웹 화면 출력 업데이트 (그래프 생략, 텍스트 요약)
                         with cols[col_idx % len(cols)]:
-                            st.write(f"**{model_name}**")
-                            if is_pass: st.success(f"✅ 통과 ({bound_text} | 기준: {limit_text})")
-                            else: st.error(f"❌ 불합격 ({bound_text} 🚫 기준: {limit_text})")
-                            st.pyplot(fig)
-                        plt.close(fig)
+                            st.markdown(f"**{model_name}**")
+                            st.write(f"- **평균:** {round(mean_val, 2)}")
+                            
+                            if is_pass:
+                                st.success(f"✅ **K값:** {bound_text} (기준: {limit_text})")
+                            else:
+                                st.error(f"❌ **K값 미달:** {bound_text} (기준: {limit_text})")
+                                
+                            if p_val > 0.05:
+                                st.info(f"✅ **p-value:** {round(p_val, 3)} (정규성 만족)")
+                            else:
+                                st.warning(f"❌ **p-value:** {round(p_val, 3)} (정규성 불만족)")
+                                
+                        plt.close(fig) # 웹에 띄우진 않지만 메모리 확보를 위해 종료
                         
                     col_idx += 1
                     
@@ -294,14 +303,14 @@ with tab1:
             excel_buffer.seek(0)
 
             st.download_button(
-                label="📥 결과 엑셀 다운로드",
+                label="📥 결과 엑셀 다운로드 (스마트 판정 적용)",
                 data=excel_buffer,
                 file_name="스텐트_전체성능분석_완료.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
 # =========================================================
-# 탭 2: 신규 데이터 생성기 코드
+# 탭 2: 신규 데이터 생성기 코드 (기존과 동일)
 # =========================================================
 with tab2:
     st.markdown("### 🎲 원하는 평균/표준편차로 데이터 추출")
@@ -319,27 +328,17 @@ with tab2:
 
     if st.button("🚀 데이터 추출 및 엑셀 생성", type="primary"):
         data_dict = {}
-        
-        # 가로(열) 개수만큼 반복하며 각각 목표치에 딱 맞는 세트 생성
         for i in range(int(n_cols)):
-            # 1. 초기 랜덤 데이터 뽑기
             raw_data = np.random.normal(loc=target_mean, scale=target_std, size=int(n_rows))
-            
-            # 2. 강제 영점 조절 (목표 평균과 편차에 100% 맞추기)
             current_mean = np.mean(raw_data)
             current_std = np.std(raw_data, ddof=1)
             adjusted_data = (raw_data - current_mean) / current_std
             final_data = (adjusted_data * target_std) + target_mean
-            
-            # 3. 요청하신 소수점 자리수 반영
             final_data = np.round(final_data, int(decimals))
-            
             data_dict[f"Set_{i+1}"] = final_data
             
-        # 데이터프레임(표 형식)으로 변환
         df = pd.DataFrame(data_dict)
         
-        # 엑셀 파일 변환
         excel_buffer = io.BytesIO()
         with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
             df.to_excel(writer, index=False, sheet_name='Generated_Data')
