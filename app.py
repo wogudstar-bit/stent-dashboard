@@ -18,7 +18,7 @@ st.title("📊 스텐트 자동 분석 & 데이터 생성 대시보드")
 tab1, tab2 = st.tabs(["📊 데이터 분석기", "🎲 임의 데이터 생성기"])
 
 # =========================================================
-# 탭 1: 기존 분석기 코드 (화면 UI 개선 및 그래프 생략 적용)
+# 탭 1: 기존 분석기 코드 (평균값 합격 판정 추가)
 # =========================================================
 with tab1:
     pink_fill = PatternFill(start_color="FFC0CB", end_color="FFC0CB", fill_type="solid")
@@ -220,13 +220,23 @@ with tab1:
                                 ws.cell(row=dr, column=col).fill = pink_fill
                                 failed_count += 1
                                 
-                        ws.cell(row=mean_row, column=col).value = round(mean_val, 2)
+                        # 평균값 엑셀 입력 및 핑크색 알람 처리
+                        mean_cell = ws.cell(row=mean_row, column=col)
+                        mean_cell.value = round(mean_val, 2)
+                        is_mean_pass = (lower_limit <= mean_val <= upper_limit)
+                        if not is_mean_pass:
+                            mean_cell.fill = pink_fill
+                            
                         ws.cell(row=mean_row+1, column=col).value = round(std_val, 2)
                         
-                        # [치수 시험] 웹 화면 출력 업데이트 (그래프 생략)
+                        # [치수 시험] 웹 화면 출력 업데이트 (평균 합격 여부 추가)
                         with cols[col_idx % len(cols)]:
                             st.markdown(f"**{model_name}**")
-                            st.write(f"- **평균:** {round(mean_val, 2)}")
+                            if is_mean_pass:
+                                st.write(f"✅ **평균:** {round(mean_val, 2)}")
+                            else:
+                                st.write(f"❌ **평균 미달:** {round(mean_val, 2)}")
+                                
                             limit_text = f"기준: {round(lower_limit, 2)} ~ {round(upper_limit, 2)}"
                             if failed_count > 0:
                                 st.error(f"❌ 불량 {failed_count}건 발생 ({limit_text})")
@@ -257,7 +267,13 @@ with tab1:
                             is_pass = check_data_pass(bound_val, operator, limit)
                             limit_text = f"{operator} {limit}"
                         
-                        ws.cell(row=mean_row, column=col).value = round(mean_val, 2)
+                        # 평균값 엑셀 입력 및 핑크색 알람 처리
+                        mean_cell = ws.cell(row=mean_row, column=col)
+                        mean_cell.value = round(mean_val, 2)
+                        is_mean_pass = check_data_pass(mean_val, operator, limit)
+                        if not is_mean_pass:
+                            mean_cell.fill = pink_fill
+                            
                         ws.cell(row=mean_row+1, column=col).value = round(std_val, 2)
                         
                         cell_k = ws.cell(row=mean_row+2, column=col)
@@ -277,22 +293,25 @@ with tab1:
                         ws.add_image(img, f"{c_letter}{header_row}")
                         img_insert_col += 6
                         
-                        # [성능 시험] 웹 화면 출력 업데이트 (그래프 생략, 텍스트 요약)
+                        # [성능 시험] 웹 화면 출력 업데이트 (평균 합격 여부 추가)
                         with cols[col_idx % len(cols)]:
                             st.markdown(f"**{model_name}**")
-                            st.write(f"- **평균:** {round(mean_val, 2)}")
+                            if is_mean_pass:
+                                st.write(f"✅ **평균:** {round(mean_val, 2)}")
+                            else:
+                                st.write(f"❌ **평균 불합격:** {round(mean_val, 2)}")
                             
                             if is_pass:
                                 st.success(f"✅ **K값:** {bound_text} (기준: {limit_text})")
                             else:
-                                st.error(f"❌ **K값 미달:** {bound_text} (기준: {limit_text})")
+                                st.error(f"❌ **K값 불합격:** {bound_text} (기준: {limit_text})")
                                 
                             if p_val > 0.05:
                                 st.info(f"✅ **p-value:** {round(p_val, 3)} (정규성 만족)")
                             else:
                                 st.warning(f"❌ **p-value:** {round(p_val, 3)} (정규성 불만족)")
                                 
-                        plt.close(fig) # 웹에 띄우진 않지만 메모리 확보를 위해 종료
+                        plt.close(fig) 
                         
                     col_idx += 1
                     
