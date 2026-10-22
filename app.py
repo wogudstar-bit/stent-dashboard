@@ -11,7 +11,28 @@ import scipy.stats as stats
 from statsmodels.stats.diagnostic import normal_ad
 import io
 import re
+
+# 워드(Word) 생성을 위한 라이브러리 (정렬 및 배경색 기능 추가)
 from docx import Document
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.table import WD_ALIGN_VERTICAL
+from docx.oxml.ns import nsdecls
+from docx.oxml import parse_xml
+
+# 워드 표(Table) 배경색 지정 및 정렬 도우미 함수
+def set_cell_bg(cell, fill="D9E1F2"):
+    shading_elm = parse_xml(r'<w:shd {} w:fill="{}"/>'.format(nsdecls('w'), fill))
+    cell._tc.get_or_add_tcPr().append(shading_elm)
+
+def style_cell(cell, text, bg_color=None, bold=False):
+    cell.text = str(text)
+    if bg_color:
+        set_cell_bg(cell, bg_color)
+    for p in cell.paragraphs:
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        for run in p.runs:
+            run.font.bold = bold
+    cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
 
 st.set_page_config(page_title="스텐트 성능 분석", layout="wide")
 st.title("📊 스텐트 자동 분석 & 데이터 생성 대시보드")
@@ -19,7 +40,7 @@ st.title("📊 스텐트 자동 분석 & 데이터 생성 대시보드")
 tab1, tab2 = st.tabs(["📊 데이터 분석기", "🎲 임의 데이터 생성기"])
 
 # =========================================================
-# 탭 1: 기존 분석기 코드 + 워드 로우 데이터 보고서 추출 기능
+# 탭 1: 기존 분석기 코드 + 고급 워드 로우 데이터 보고서
 # =========================================================
 with tab1:
     pink_fill = PatternFill(start_color="FFC0CB", end_color="FFC0CB", fill_type="solid")
@@ -169,9 +190,7 @@ with tab1:
                     grouped_blocks[m_name] = []
                 grouped_blocks[m_name].append(block)
                 
-            st.success(f"✅ 총 **{len(grouped_blocks)}개**의 시험 항목(대분류) 분석 시작...")
-            
-            # 워드 보고서를 만들기 위해 '로우 데이터'까지 모아둘 딕셔너리
+            st.success(f"✅ 총 **{len(grouped_blocks)}개**의 시험 항목 분석 시작...")
             report_data = {}
 
             for main_name, sub_blocks in grouped_blocks.items():
@@ -231,13 +250,12 @@ with tab1:
                         mean_val = np.mean(data)
                         std_val = np.std(data, ddof=1)
                         
-                        # 워드에 기록할 현재 모델의 결과 딕셔너리 (로우 데이터 포함!)
                         result_dict = {
                             "model": model_name,
-                            "mode": mode_text.split(" ")[1],
-                            "mean": round(mean_val, 2),
-                            "std": round(std_val, 2),
-                            "raw_data": data # 엑셀의 측정값 리스트 전체 저장
+                            "is_dimensional": is_dimensional,
+                            "mean": round(mean_val, 1),
+                            "std": round(std_val, 1),
+                            "raw_data": []
                         }
 
                         if is_dimensional:
@@ -260,42 +278,38 @@ with tab1:
                             
                             failed_count = 0
                             for dr, val_float in data_cells:
-                                if not (lower_limit <= val_float <= upper_limit):
+                                is_val_pass = (lower_limit <= val_float <= upper_limit)
+                                if not is_val_pass:
                                     ws.cell(row=dr, column=col).fill = pink_fill
                                     failed_count += 1
+                                result_dict["raw_data"].append((val_float, "Pass" if is_val_pass else "Fail"))
                                     
                             mean_cell = ws.cell(row=mean_row, column=col)
                             mean_cell.value = round(mean_val, 2)
                             is_mean_pass = (lower_limit <= mean_val <= upper_limit)
-                            if not is_mean_pass:
-                                mean_cell.fill = pink_fill
+                            if not is_mean_pass: mean_cell.fill = pink_fill
                                 
                             ws.cell(row=mean_row+1, column=col).value = round(std_val, 2)
                             
                             result_dict["criteria"] = limit_text_clean
-                            result_dict["k_val"] = "-"
-                            result_dict["p_val"] = "-"
-                            result_dict["is_pass"] = is_mean_pass and (failed_count == 0)
-
+                            
                             with cols[col_idx % len(cols)]:
                                 st.markdown(f"**{model_name}**")
-                                if is_mean_pass:
-                                    st.write(f"✅ **평균:** {round(mean_val, 2)}")
-                                else:
-                                    st.write(f"❌ **평균 미달:** {round(mean_val, 2)}")
+                                if is_mean_pass: st.write(f"✅ **평균:** {round(mean_val, 2)}")
+                                else: st.write(f"❌ **평균 미달:** {round(mean_val, 2)}")
                                     
                                 limit_text = f"기준: {limit_text_clean}"
-                                if failed_count > 0:
-                                    st.error(f"❌ 불량 {failed_count}건 발생 ({limit_text})")
-                                else:
-                                    st.success(f"✅ 전수 통과 ({limit_text})")
+                                if failed_count > 0: st.error(f"❌ 불량 {failed_count}건 발생 ({limit_text})")
+                                else: st.success(f"✅ 전수 통과 ({limit_text})")
                             
                         else:
                             operator, limit = parse_criteria(raw_criteria)
                             
                             for dr, val_float in data_cells:
-                                if not check_data_pass(val_float, operator, limit):
+                                is_val_pass = check_data_pass(val_float, operator, limit)
+                                if not is_val_pass:
                                     ws.cell(row=dr, column=col).fill = pink_fill
+                                result_dict["raw_data"].append((val_float, "Pass" if is_val_pass else "Fail"))
                                     
                             stat, p_val = normal_ad(np.array(data))
                             
@@ -305,20 +319,22 @@ with tab1:
                                 bound_text = f"{round(ltl, 2)} ~ {round(utl, 2)}"
                                 is_pass = (ltl >= limit[0]) and (utl <= limit[1])
                                 limit_text_clean = f"{limit[0]} ~ {limit[1]}"
+                                k_label = "LTL ~ UTL"
                             else:
                                 if operator in ['<=', '<']:
                                     bound_val = mean_val + (k_val_one * std_val)
+                                    k_label = "Avg + k * stdev"
                                 else:
                                     bound_val = mean_val - (k_val_one * std_val)
-                                bound_text = str(round(bound_val, 2))
+                                    k_label = "Avg - k * stdev"
+                                bound_text = str(round(bound_val, 1))
                                 is_pass = check_data_pass(bound_val, operator, limit)
                                 limit_text_clean = f"{operator} {limit}"
                             
                             mean_cell = ws.cell(row=mean_row, column=col)
                             mean_cell.value = round(mean_val, 2)
                             is_mean_pass = check_data_pass(mean_val, operator, limit)
-                            if not is_mean_pass:
-                                mean_cell.fill = pink_fill
+                            if not is_mean_pass: mean_cell.fill = pink_fill
                                 
                             ws.cell(row=mean_row+1, column=col).value = round(std_val, 2)
                             
@@ -331,9 +347,9 @@ with tab1:
                             if p_val <= 0.05: cell_p.fill = pink_fill
                             
                             result_dict["criteria"] = limit_text_clean
+                            result_dict["k_label"] = k_label
                             result_dict["k_val"] = bound_text
                             result_dict["p_val"] = round(p_val, 3)
-                            result_dict["is_pass"] = is_pass
 
                             fig, img_buffer = create_minitab_plot(np.array(data), model_name)
                             img = OpenpyxlImage(img_buffer)
@@ -346,20 +362,11 @@ with tab1:
                             
                             with cols[col_idx % len(cols)]:
                                 st.markdown(f"**{model_name}**")
-                                if is_mean_pass:
-                                    st.write(f"✅ **평균:** {round(mean_val, 2)}")
-                                else:
-                                    st.write(f"❌ **평균 불합격:** {round(mean_val, 2)}")
+                                if is_mean_pass: st.write(f"✅ **평균:** {round(mean_val, 2)}")
+                                else: st.write(f"❌ **평균 불합격:** {round(mean_val, 2)}")
                                 
-                                if is_pass:
-                                    st.success(f"✅ **K값:** {bound_text} (기준: {limit_text_clean})")
-                                else:
-                                    st.error(f"❌ **K값 불합격:** {bound_text} (기준: {limit_text_clean})")
-                                    
-                                if p_val > 0.05:
-                                    st.info(f"✅ **p-value:** {round(p_val, 3)} (정규성 만족)")
-                                else:
-                                    st.warning(f"❌ **p-value:** {round(p_val, 3)} (정규성 불만족)")
+                                if is_pass: st.success(f"✅ **K값:** {bound_text}")
+                                else: st.error(f"❌ **K값 불합격:** {bound_text}")
                                     
                             plt.close(fig) 
                             
@@ -368,97 +375,81 @@ with tab1:
                         
                 st.divider()
 
-            # [1] 엑셀 파일 저장 준비
             excel_buffer = io.BytesIO()
             wb.save(excel_buffer)
             excel_buffer.seek(0)
             
-            # [2] 워드 보고서 생성 (로우 데이터 전체 반영)
+            # [2] 고급 워드 보고서 생성 (이미지 양식 100% 반영)
             doc = Document()
-            doc.add_heading('스텐트 성능 및 치수 시험 로우 데이터(Raw Data)', 0)
+            doc.add_heading('스텐트 성능 및 치수 시험 보고서', 0)
             
             for main_name, sub_tests in report_data.items():
-                doc.add_heading(main_name, level=1)
-                
                 for test_name, models in sub_tests.items():
-                    doc.add_heading(f"{test_name} 시험 데이터", level=2)
+                    if not models: continue
+                    doc.add_heading(f"■ {main_name} - {test_name}", level=2)
                     
-                    if not models:
-                        continue
+                    # 💡 각 모델별로 독립된 표(Table) 생성 (이미지 양식 적용)
+                    for m in models:
+                        num_samples = len(m['raw_data'])
+                        is_perf = not m['is_dimensional']
                         
-                    # 표 생성 (시료열 1개 + 모델 수만큼 열 추가)
-                    cols_count = len(models) + 1
-                    table = doc.add_table(rows=1, cols=cols_count)
-                    table.style = 'Table Grid'
-                    
-                    # 1. 헤더 작성 (모델명)
-                    hdr_cells = table.rows[0].cells
-                    hdr_cells[0].text = '구분 / 시료'
-                    for i, m in enumerate(models):
-                        hdr_cells[i+1].text = str(m['model'])
+                        # 표 생성: 헤더(1행) + 데이터(N행) + 요약(2~4행)
+                        summary_rows_count = 4 if is_perf else 2
+                        total_rows = 1 + num_samples + summary_rows_count
+                        table = doc.add_table(rows=total_rows, cols=6)
+                        table.style = 'Table Grid'
                         
-                    # 2. 로우 데이터(Raw Data) 반복 입력
-                    # 모델들 중 가장 데이터 개수가 많은 것을 기준으로 행(Row) 생성
-                    max_len = max([len(m['raw_data']) for m in models])
-                    for row_idx in range(max_len):
-                        row_cells = table.add_row().cells
-                        row_cells[0].text = f"시료 {row_idx + 1}"
-                        for col_idx, m in enumerate(models):
-                            # 해당 모델에 해당 행의 데이터가 존재하면 출력, 없으면 빈칸 처리
-                            if row_idx < len(m['raw_data']):
-                                row_cells[col_idx+1].text = str(m['raw_data'][row_idx])
-                            else:
-                                row_cells[col_idx+1].text = "-"
-                                
-                    # 3. 요약 데이터 추가 (엑셀 구조와 똑같이 표 맨 밑에 추가)
-                    summary_rows = [
-                        ("평균", 'mean'),
-                        ("표준편차", 'std'),
-                        ("허용 기준", 'criteria'),
-                        ("K값", 'k_val'),
-                        ("p-value", 'p_val'),
-                        ("최종 판정", 'is_pass')
-                    ]
-                    
-                    for label, key in summary_rows:
-                        row_cells = table.add_row().cells
-                        row_cells[0].text = label
-                        for col_idx, m in enumerate(models):
-                            val = m[key]
-                            if key == 'is_pass':
-                                val = "✅ 적합" if val else "❌ 부적합"
-                            row_cells[col_idx+1].text = str(val)
+                        # 1. 헤더행 작성 및 스타일 적용 (배경색: D9E1F2)
+                        headers = ["No", "Art no.", "Lot no.", "Acceptance criteria", "Results", "Pass / Fail"]
+                        for i, h_text in enumerate(headers):
+                            style_cell(table.cell(0, i), h_text, bg_color="D9E1F2", bold=True)
                             
-                    doc.add_paragraph() # 다음 표와의 간격 추가
+                        # 2. 로우 데이터(Raw Data) 작성
+                        for i, (val, pf_status) in enumerate(m['raw_data']):
+                            r_idx = i + 1
+                            style_cell(table.cell(r_idx, 0), str(i + 1))
+                            style_cell(table.cell(r_idx, 1), m['model'])
+                            style_cell(table.cell(r_idx, 2), "-") # Lot no 빈칸 처리
+                            style_cell(table.cell(r_idx, 3), m['criteria'])
+                            style_cell(table.cell(r_idx, 4), f"{val:g}") # 자리수 깔끔하게 (소수점 불필요시 제거)
+                            style_cell(table.cell(r_idx, 5), pf_status)
+                            
+                        # 셀 병합 (Art no. 와 Acceptance criteria)
+                        if num_samples > 1:
+                            table.cell(1, 1).merge(table.cell(num_samples, 1))
+                            table.cell(1, 3).merge(table.cell(num_samples, 3))
+                            
+                        # 3. 하단 요약 데이터 작성 도우미 함수 (1~4열 병합, 5~6열 병합)
+                        def add_summary(row_idx, label, value):
+                            table.cell(row_idx, 0).merge(table.cell(row_idx, 3))
+                            table.cell(row_idx, 4).merge(table.cell(row_idx, 5))
+                            style_cell(table.cell(row_idx, 0), label, bg_color="D9E1F2")
+                            style_cell(table.cell(row_idx, 4), str(value), bg_color="D9E1F2", bold=True)
+                            
+                        sum_start = num_samples + 1
+                        add_summary(sum_start, "Average", m['mean'])
+                        add_summary(sum_start + 1, "Standard deviation", m['std'])
+                        
+                        if is_perf:
+                            add_summary(sum_start + 2, m['k_label'], m['k_val'])
+                            add_summary(sum_start + 3, "p-value (Normality Test)", m['p_val'])
+                            
+                        doc.add_paragraph() # 다음 표와의 여백
 
             docx_buffer = io.BytesIO()
             doc.save(docx_buffer)
             docx_buffer.seek(0)
 
-            # [3] 화면 하단 다운로드 버튼 (2개 나란히 배치)
+            # [3] 화면 하단 다운로드 버튼
             st.markdown("### 🎉 분석 완료!")
             dl_col1, dl_col2 = st.columns(2)
-            
             with dl_col1:
-                st.download_button(
-                    label="📊 결과 엑셀 파일 다운로드",
-                    data=excel_buffer,
-                    file_name="스텐트_전체성능분석_완료.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True
-                )
-                
+                st.download_button("📊 결과 엑셀 다운로드", data=excel_buffer, file_name="스텐트_전체성능분석_완료.xlsx", use_container_width=True)
             with dl_col2:
-                st.download_button(
-                    label="📄 로우 데이터(Raw Data) 워드 보고서 다운로드",
-                    data=docx_buffer,
-                    file_name="스텐트_로우데이터_보고서.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    use_container_width=True
-                )
+                st.download_button("📄 고급 워드(Word) 보고서 다운로드", data=docx_buffer, file_name="스텐트_보고서_최종.docx", use_container_width=True)
 
 # =========================================================
-# 탭 2: 신규 데이터 생성기 코드 (생략 없이 유지)
+# 탭 2: 신규 데이터 생성기 코드 (기존과 동일)
 # =========================================================
 with tab2:
     st.markdown("### 🎲 원하는 평균/표준편차로 데이터 추출")
@@ -495,9 +486,4 @@ with tab2:
         st.success("🎉 데이터 생성이 완료되었습니다! (아래 표에서 미리보기가 가능합니다)")
         st.dataframe(df, use_container_width=True)
         
-        st.download_button(
-            label="📥 추출된 가상 데이터 엑셀 다운로드",
-            data=excel_buffer,
-            file_name="가상데이터_추출결과.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+        st.download_button("📥 추출된 가상 데이터 엑셀 다운로드", data=excel_buffer, file_name="가상데이터_추출결과.xlsx")
