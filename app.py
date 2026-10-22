@@ -11,6 +11,7 @@ import scipy.stats as stats
 from statsmodels.stats.diagnostic import normal_ad
 import io
 import re
+from docx import Document  # 워드 파일 생성을 위한 라이브러리 추가
 
 st.set_page_config(page_title="스텐트 성능 분석", layout="wide")
 st.title("📊 스텐트 자동 분석 & 데이터 생성 대시보드")
@@ -18,7 +19,7 @@ st.title("📊 스텐트 자동 분석 & 데이터 생성 대시보드")
 tab1, tab2 = st.tabs(["📊 데이터 분석기", "🎲 임의 데이터 생성기"])
 
 # =========================================================
-# 탭 1: 기존 분석기 코드 (대분류 시험명 기준 그룹핑 적용)
+# 탭 1: 기존 분석기 코드 + 워드 보고서 추출 기능 추가
 # =========================================================
 with tab1:
     pink_fill = PatternFill(start_color="FFC0CB", end_color="FFC0CB", fill_type="solid")
@@ -129,7 +130,7 @@ with tab1:
             k_val_one, k_val_two = 0.0, 0.0
             
         blocks = []
-        current_main_name = "미지정 시험" # 메인 시험명 추적용
+        current_main_name = "미지정 시험"
         
         for r in range(1, ws.max_row + 15):
             c_val = ws.cell(row=r, column=1).value
@@ -137,19 +138,15 @@ with tab1:
             
             if isinstance(c_val, str):
                 c_str = c_val.strip()
-                
-                # 1. 메인 시험명(대분류) 자동 추적 로직
-                # B열이 비어있고, 일반적인 통계 용어가 아닌 경우 대분류명으로 인식
                 if b_val is None and c_str and c_str not in ["평균", "표준편차", "criteria", "K값", "p값", "BTR", "2A", "2R"]:
-                    if re.match(r'^\d+[\.\)]', c_str): # "1. " 형태면 무조건 메인 제목 갱신
+                    if re.match(r'^\d+[\.\)]', c_str):
                         current_main_name = c_str
-                    else: # 숫자가 없더라도 부제목(예: Body Diameter)이면 뒤에 이어붙임
+                    else:
                         if current_main_name != "미지정 시험" and not current_main_name.endswith(c_str):
                             current_main_name = f"{current_main_name} - {c_str}"
                         elif current_main_name == "미지정 시험":
                             current_main_name = c_str
                             
-                # 2. 서브 데이터 묶음(BTR, 2A 등) 탐색 로직
                 if c_str == "평균":
                     header_row = r - 1
                     while header_row > 1:
@@ -169,7 +166,6 @@ with tab1:
         if not blocks:
             st.error("⚠️ A열에 '평균'이 포함되어 있는지 확인하세요.")
         else:
-            # 추출된 블록들을 대분류(main_test_name) 기준으로 묶어주기 (Grouping)
             grouped_blocks = {}
             for block in blocks:
                 m_name = block['main_test_name']
@@ -177,16 +173,21 @@ with tab1:
                     grouped_blocks[m_name] = []
                 grouped_blocks[m_name].append(block)
                 
-            st.success(f"✅ 총 **{len(grouped_blocks)}개**의 시험 항목(대분류)과 **{len(blocks)}개**의 세부 묶음 스캔 완료!")
+            st.success(f"✅ 총 **{len(grouped_blocks)}개**의 시험 항목(대분류) 분석 시작...")
             
-            # 대분류별로 묶어서 화면에 깔끔하게 출력
+            # 워드 보고서를 만들기 위해 결과 데이터를 모아둘 딕셔너리
+            report_data = {}
+
             for main_name, sub_blocks in grouped_blocks.items():
-                st.markdown(f"## 📌 {main_name}") # 큰 제목 (예: 1. Deployment force)
+                st.markdown(f"## 📌 {main_name}")
+                report_data[main_name] = {} # 워드용 데이터 구조
                 
                 for block in sub_blocks:
                     mean_row = block['mean_row']
                     header_row = block['header_row']
-                    test_name = str(ws.cell(row=header_row, column=1).value) # 서브 제목 (예: BTR)
+                    test_name = str(ws.cell(row=header_row, column=1).value)
+                    
+                    report_data[main_name][test_name] = [] # 모델별 결과를 담을 리스트
                     
                     last_col = 2
                     while ws.cell(row=header_row, column=last_col).value is not None:
@@ -234,6 +235,14 @@ with tab1:
                         mean_val = np.mean(data)
                         std_val = np.std(data, ddof=1)
                         
+                        # 워드에 기록할 현재 모델의 결과 딕셔너리
+                        result_dict = {
+                            "model": model_name,
+                            "mode": mode_text.split(" ")[1],
+                            "mean": round(mean_val, 2),
+                            "std": round(std_val, 2)
+                        }
+
                         if is_dimensional:
                             try:
                                 base_val = float(str(raw_criteria).replace(',', ''))
@@ -250,6 +259,7 @@ with tab1:
                                 
                             lower_limit = base_val * (1 - pct_float)
                             upper_limit = base_val * (1 + pct_float)
+                            limit_text_clean = f"{round(lower_limit, 2)} ~ {round(upper_limit, 2)}"
                             
                             failed_count = 0
                             for dr, val_float in data_cells:
@@ -265,6 +275,12 @@ with tab1:
                                 
                             ws.cell(row=mean_row+1, column=col).value = round(std_val, 2)
                             
+                            # 워드 결과 추가 (치수)
+                            result_dict["criteria"] = limit_text_clean
+                            result_dict["k_val"] = "-"
+                            result_dict["p_val"] = "-"
+                            result_dict["is_pass"] = is_mean_pass and (failed_count == 0)
+
                             with cols[col_idx % len(cols)]:
                                 st.markdown(f"**{model_name}**")
                                 if is_mean_pass:
@@ -272,7 +288,7 @@ with tab1:
                                 else:
                                     st.write(f"❌ **평균 미달:** {round(mean_val, 2)}")
                                     
-                                limit_text = f"기준: {round(lower_limit, 2)} ~ {round(upper_limit, 2)}"
+                                limit_text = f"기준: {limit_text_clean}"
                                 if failed_count > 0:
                                     st.error(f"❌ 불량 {failed_count}건 발생 ({limit_text})")
                                 else:
@@ -292,15 +308,15 @@ with tab1:
                                 utl = mean_val + (k_val_two * std_val)
                                 bound_text = f"{round(ltl, 2)} ~ {round(utl, 2)}"
                                 is_pass = (ltl >= limit[0]) and (utl <= limit[1])
-                                limit_text = f"{limit[0]} ~ {limit[1]}"
+                                limit_text_clean = f"{limit[0]} ~ {limit[1]}"
                             else:
                                 if operator in ['<=', '<']:
                                     bound_val = mean_val + (k_val_one * std_val)
                                 else:
                                     bound_val = mean_val - (k_val_one * std_val)
-                                bound_text = round(bound_val, 2)
+                                bound_text = str(round(bound_val, 2))
                                 is_pass = check_data_pass(bound_val, operator, limit)
-                                limit_text = f"{operator} {limit}"
+                                limit_text_clean = f"{operator} {limit}"
                             
                             mean_cell = ws.cell(row=mean_row, column=col)
                             mean_cell.value = round(mean_val, 2)
@@ -317,7 +333,13 @@ with tab1:
                             cell_p = ws.cell(row=mean_row+3, column=col)
                             cell_p.value = round(p_val, 3)
                             if p_val <= 0.05: cell_p.fill = pink_fill
-                                    
+                            
+                            # 워드 결과 추가 (성능)
+                            result_dict["criteria"] = limit_text_clean
+                            result_dict["k_val"] = bound_text
+                            result_dict["p_val"] = round(p_val, 3)
+                            result_dict["is_pass"] = is_pass
+
                             fig, img_buffer = create_minitab_plot(np.array(data), model_name)
                             img = OpenpyxlImage(img_buffer)
                             img.width = int(9.6 * 37.8)
@@ -335,9 +357,9 @@ with tab1:
                                     st.write(f"❌ **평균 불합격:** {round(mean_val, 2)}")
                                 
                                 if is_pass:
-                                    st.success(f"✅ **K값:** {bound_text} (기준: {limit_text})")
+                                    st.success(f"✅ **K값:** {bound_text} (기준: {limit_text_clean})")
                                 else:
-                                    st.error(f"❌ **K값 불합격:** {bound_text} (기준: {limit_text})")
+                                    st.error(f"❌ **K값 불합격:** {bound_text} (기준: {limit_text_clean})")
                                     
                                 if p_val > 0.05:
                                     st.info(f"✅ **p-value:** {round(p_val, 3)} (정규성 만족)")
@@ -346,23 +368,77 @@ with tab1:
                                     
                             plt.close(fig) 
                             
+                        # 리스트에 현재 모델 결과 적재
+                        report_data[main_name][test_name].append(result_dict)
                         col_idx += 1
                         
-                st.divider() # 대분류 시험(1. Deployment force 등) 하나가 끝날 때마다 구분선 추가
+                st.divider()
 
+            # [1] 엑셀 파일 저장 준비
             excel_buffer = io.BytesIO()
             wb.save(excel_buffer)
             excel_buffer.seek(0)
+            
+            # [2] 워드 보고서 파일 생성 (python-docx)
+            doc = Document()
+            doc.add_heading('스텐트 성능 및 치수 시험 결과 요약', 0)
+            
+            for main_name, sub_tests in report_data.items():
+                doc.add_heading(main_name, level=1)
+                
+                for test_name, models in sub_tests.items():
+                    doc.add_heading(f"{test_name} 시험 요약", level=2)
+                    
+                    # 표 생성 (열 6개)
+                    table = doc.add_table(rows=1, cols=6)
+                    table.style = 'Table Grid'
+                    hdr_cells = table.rows[0].cells
+                    hdr_cells[0].text = '모델명'
+                    hdr_cells[1].text = '허용 기준'
+                    hdr_cells[2].text = '평균'
+                    hdr_cells[3].text = 'K값(성능)'
+                    hdr_cells[4].text = 'p-value'
+                    hdr_cells[5].text = '최종 판정'
+                    
+                    for m in models:
+                        row_cells = table.add_row().cells
+                        row_cells[0].text = str(m['model'])
+                        row_cells[1].text = str(m['criteria'])
+                        row_cells[2].text = str(m['mean'])
+                        row_cells[3].text = str(m['k_val'])
+                        row_cells[4].text = str(m['p_val'])
+                        row_cells[5].text = "적합" if m['is_pass'] else "부적합"
+                        
+                    doc.add_paragraph() # 표 사이 여백 추가
 
-            st.download_button(
-                label="📥 결과 엑셀 다운로드 (스마트 판정 적용)",
-                data=excel_buffer,
-                file_name="스텐트_전체성능분석_완료.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+            docx_buffer = io.BytesIO()
+            doc.save(docx_buffer)
+            docx_buffer.seek(0)
+
+            # [3] 화면 하단 다운로드 버튼 (2개 나란히 배치)
+            st.markdown("### 🎉 분석 완료!")
+            dl_col1, dl_col2 = st.columns(2)
+            
+            with dl_col1:
+                st.download_button(
+                    label="📊 결과 엑셀 파일 다운로드",
+                    data=excel_buffer,
+                    file_name="스텐트_전체성능분석_완료.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
+                
+            with dl_col2:
+                st.download_button(
+                    label="📄 워드(Word) 결과 보고서 다운로드",
+                    data=docx_buffer,
+                    file_name="스텐트_성능시험_요약보고서.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    use_container_width=True
+                )
 
 # =========================================================
-# 탭 2: 신규 데이터 생성기 코드 (기존과 동일)
+# 탭 2: 신규 데이터 생성기 코드 (생략 없이 유지)
 # =========================================================
 with tab2:
     st.markdown("### 🎲 원하는 평균/표준편차로 데이터 추출")
