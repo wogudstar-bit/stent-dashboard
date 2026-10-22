@@ -1,6 +1,8 @@
 streamlit
 openpyxl
+pandas
 numpy
 matplotlib
 scipy
 statsmodels
+python-docx
