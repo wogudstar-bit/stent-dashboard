@@ -12,14 +12,12 @@ from statsmodels.stats.diagnostic import normal_ad
 import io
 import re
 
-# 워드(Word) 생성을 위한 라이브러리 (정렬 및 배경색 기능 추가)
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_ALIGN_VERTICAL
 from docx.oxml.ns import nsdecls
 from docx.oxml import parse_xml
 
-# 워드 표(Table) 배경색 지정 및 정렬 도우미 함수
 def set_cell_bg(cell, fill="D9E1F2"):
     shading_elm = parse_xml(r'<w:shd {} w:fill="{}"/>'.format(nsdecls('w'), fill))
     cell._tc.get_or_add_tcPr().append(shading_elm)
@@ -40,7 +38,7 @@ st.title("📊 스텐트 자동 분석 & 데이터 생성 대시보드")
 tab1, tab2 = st.tabs(["📊 데이터 분석기", "🎲 임의 데이터 생성기"])
 
 # =========================================================
-# 탭 1: 기존 분석기 코드 + 고급 워드 로우 데이터 보고서
+# 탭 1: 분석기 메인 코드
 # =========================================================
 with tab1:
     pink_fill = PatternFill(start_color="FFC0CB", end_color="FFC0CB", fill_type="solid")
@@ -379,7 +377,7 @@ with tab1:
             wb.save(excel_buffer)
             excel_buffer.seek(0)
             
-            # [2] 고급 워드 보고서 생성 (이미지 양식 100% 반영)
+            # [2] 고급 워드 보고서 생성 (셀 병합 텍스트 중복 현상 해결)
             doc = Document()
             doc.add_heading('스텐트 성능 및 치수 시험 보고서', 0)
             
@@ -388,38 +386,42 @@ with tab1:
                     if not models: continue
                     doc.add_heading(f"■ {main_name} - {test_name}", level=2)
                     
-                    # 💡 각 모델별로 독립된 표(Table) 생성 (이미지 양식 적용)
                     for m in models:
                         num_samples = len(m['raw_data'])
                         is_perf = not m['is_dimensional']
                         
-                        # 표 생성: 헤더(1행) + 데이터(N행) + 요약(2~4행)
                         summary_rows_count = 4 if is_perf else 2
                         total_rows = 1 + num_samples + summary_rows_count
                         table = doc.add_table(rows=total_rows, cols=6)
                         table.style = 'Table Grid'
                         
-                        # 1. 헤더행 작성 및 스타일 적용 (배경색: D9E1F2)
+                        # 1. 헤더행 작성
                         headers = ["No", "Art no.", "Lot no.", "Acceptance criteria", "Results", "Pass / Fail"]
                         for i, h_text in enumerate(headers):
                             style_cell(table.cell(0, i), h_text, bg_color="D9E1F2", bold=True)
                             
-                        # 2. 로우 데이터(Raw Data) 작성
+                        # 2. 로우 데이터 작성 (병합될 셀에는 첫 번째 행에만 글씨 쓰기)
                         for i, (val, pf_status) in enumerate(m['raw_data']):
                             r_idx = i + 1
                             style_cell(table.cell(r_idx, 0), str(i + 1))
-                            style_cell(table.cell(r_idx, 1), m['model'])
-                            style_cell(table.cell(r_idx, 2), "-") # Lot no 빈칸 처리
-                            style_cell(table.cell(r_idx, 3), m['criteria'])
-                            style_cell(table.cell(r_idx, 4), f"{val:g}") # 자리수 깔끔하게 (소수점 불필요시 제거)
+                            style_cell(table.cell(r_idx, 2), "-")
+                            style_cell(table.cell(r_idx, 4), f"{val:g}") 
                             style_cell(table.cell(r_idx, 5), pf_status)
                             
-                        # 셀 병합 (Art no. 와 Acceptance criteria)
+                            # ✨ [핵심 해결] 병합할 열(Art no, Criteria)은 첫 번째 칸에만 쓰고 나머지는 빈칸 유지
+                            if i == 0:
+                                style_cell(table.cell(r_idx, 1), m['model'])
+                                style_cell(table.cell(r_idx, 3), m['criteria'])
+                            else:
+                                table.cell(r_idx, 1).text = ""
+                                table.cell(r_idx, 3).text = ""
+                            
+                        # 셀 병합 실행
                         if num_samples > 1:
                             table.cell(1, 1).merge(table.cell(num_samples, 1))
                             table.cell(1, 3).merge(table.cell(num_samples, 3))
                             
-                        # 3. 하단 요약 데이터 작성 도우미 함수 (1~4열 병합, 5~6열 병합)
+                        # 3. 하단 요약 데이터 작성
                         def add_summary(row_idx, label, value):
                             table.cell(row_idx, 0).merge(table.cell(row_idx, 3))
                             table.cell(row_idx, 4).merge(table.cell(row_idx, 5))
@@ -434,7 +436,7 @@ with tab1:
                             add_summary(sum_start + 2, m['k_label'], m['k_val'])
                             add_summary(sum_start + 3, "p-value (Normality Test)", m['p_val'])
                             
-                        doc.add_paragraph() # 다음 표와의 여백
+                        doc.add_paragraph()
 
             docx_buffer = io.BytesIO()
             doc.save(docx_buffer)
