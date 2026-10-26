@@ -14,7 +14,7 @@ import re
 
 # 워드(Word) 생성을 위한 라이브러리
 from docx import Document
-from docx.shared import Pt, Cm  # Cm 단위 추가
+from docx.shared import Pt, Cm, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_ALIGN_VERTICAL
 from docx.oxml.ns import nsdecls
@@ -226,7 +226,7 @@ with tab1:
                     test_name = str(ws.cell(row=header_row, column=1).value)
                     test_name_clean = test_name.strip()
                     
-                    report_data[main_name][test_name] = [] 
+                    report_data[main_name][test_name] = {"models": [], "is_dimensional": True}
                     
                     last_col = 2
                     while ws.cell(row=header_row, column=last_col).value is not None: last_col += 1
@@ -242,6 +242,7 @@ with tab1:
                             if "k값" in c_str or "p값" in c_str: is_dimensional = False
                                 
                     if crit_row is None: crit_row = mean_row + 4 
+                    report_data[main_name][test_name]["is_dimensional"] = is_dimensional
 
                     mode_text = "📏 치수 시험" if is_dimensional else "📈 성능 시험"
                     st.markdown(f"#### ↳ 🧪 {test_name} ({mode_text})")
@@ -303,7 +304,8 @@ with tab1:
                             "is_dimensional": is_dimensional,
                             "mean_str": fmt_val(mean_val),
                             "std_str": fmt_val(std_val),
-                            "raw_data": []
+                            "raw_data": [],
+                            "plot_img": None # 그래프 이미지를 담을 변수 추가
                         }
 
                         if is_dimensional:
@@ -399,6 +401,9 @@ with tab1:
                             result_dict["p_val_str"] = f"{p_val:.3f}"
 
                             fig, img_buffer = create_minitab_plot(np.array(data), model_name)
+                            # 워드 삽입용 그래프 캡처 (BytesIO)
+                            result_dict["plot_img"] = img_buffer
+                            
                             img = OpenpyxlImage(img_buffer)
                             img.width, img.height = int(9.6 * 37.8), int(6.2 * 37.8)
                             c_letter = get_column_letter(img_insert_col)
@@ -412,7 +417,7 @@ with tab1:
                                 else: st.error(f"❌ **K값 불합격:** {bound_text}")
                             plt.close(fig) 
                             
-                        report_data[main_name][test_name].append(result_dict)
+                        report_data[main_name][test_name]["models"].append(result_dict)
                         col_idx += 1
                         
                 st.divider()
@@ -435,24 +440,25 @@ with tab1:
                 run.font.size = Pt(9)
             
             for main_name, sub_tests in report_data.items():
-                for test_name, models in sub_tests.items():
+                for test_name, test_info in sub_tests.items():
+                    models = test_info["models"]
                     if not models: continue
+                    is_perf_test = not test_info["is_dimensional"]
                     
                     sub_title = doc.add_heading(f"■ {main_name} - {test_name}", level=2)
                     for run in sub_title.runs:
                         run.font.name = 'Times New Roman'
                         run.font.size = Pt(9)
                     
+                    # --- 1. 텍스트 결과 표 작성 ---
                     for m in models:
                         num_samples = len(m['raw_data'])
-                        is_perf = not m['is_dimensional']
                         
-                        summary_rows_count = 4 if is_perf else 2
+                        summary_rows_count = 4 if is_perf_test else 2
                         total_rows = 1 + num_samples + summary_rows_count
                         table = doc.add_table(rows=total_rows, cols=6)
                         table.style = 'Table Grid'
                         
-                        # ✨ 표의 모든 셀 높이를 0.5cm로 설정
                         for row in table.rows:
                             row.height = Cm(0.5)
                         
@@ -486,11 +492,40 @@ with tab1:
                         add_summary(sum_start, "Average", m['mean_str'])
                         add_summary(sum_start + 1, "Standard deviation", m['std_str'])
                         
-                        if is_perf:
+                        if is_perf_test:
                             add_summary(sum_start + 2, m['k_label'], m['k_val_str'])
                             add_summary(sum_start + 3, "p-value (Normality Test)", m['p_val_str'])
                             
                         doc.add_paragraph()
+                        
+                    # --- 2. 통계 그래프 표 삽입 (성능 시험일 경우에만) ---
+                    if is_perf_test:
+                        stat_title = doc.add_heading(f"Statistical analysis ({test_name})", level=3)
+                        for run in stat_title.runs:
+                            run.font.name = 'Times New Roman'
+                            run.font.size = Pt(9)
+                            
+                        # 그래프를 2열(가로 2개)로 배치하기 위해 수학적 계산
+                        num_plots = len(models)
+                        num_rows = (num_plots + 1) // 2
+                        
+                        img_table = doc.add_table(rows=num_rows, cols=2)
+                        img_table.style = 'Table Grid'
+                        
+                        plot_idx = 0
+                        for row_idx in range(num_rows):
+                            for col_idx in range(2):
+                                if plot_idx < num_plots:
+                                    cell = img_table.cell(row_idx, col_idx)
+                                    img_buf = models[plot_idx]["plot_img"]
+                                    
+                                    # 셀 안에 이미지 삽입 (가로폭 약 8cm로 조정)
+                                    p = cell.paragraphs[0]
+                                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                    run = p.add_run()
+                                    run.add_picture(img_buf, width=Cm(8.0))
+                                plot_idx += 1
+                        doc.add_paragraph() # 시험 묶음 끝 구분을 위한 여백
 
             docx_buffer = io.BytesIO()
             doc.save(docx_buffer)
