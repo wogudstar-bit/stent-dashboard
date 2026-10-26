@@ -25,7 +25,7 @@ def set_cell_bg(cell, fill="D9E1F2"):
     cell._tc.get_or_add_tcPr().append(shading_elm)
 
 def style_cell(cell, text, bg_color=None, bold=False):
-    cell.text = str(text) # 기존 텍스트(엔터키 포함)를 완전히 밀어버리고 새로 작성
+    cell.text = str(text) 
     if bg_color:
         set_cell_bg(cell, bg_color)
     for p in cell.paragraphs:
@@ -309,7 +309,12 @@ with tab1:
                                     k_label = "Avg - k * stdev"
                                 bound_text = str(round(bound_val, 1))
                                 is_pass = check_data_pass(bound_val, operator, limit)
-                                limit_text_clean = f"{operator} {limit}"
+                                
+                                # ✨ [수학 기호 변환 로직 적용]
+                                op_map = {'<=': '≤', '>=': '≥', '<': '<', '>': '>'}
+                                display_op = op_map.get(operator, operator)
+                                limit_display = int(limit) if limit.is_integer() else limit
+                                limit_text_clean = f"{display_op} {limit_display}"
                             
                             mean_cell = ws.cell(row=mean_row, column=col)
                             mean_cell.value = round(mean_val, 2)
@@ -352,7 +357,7 @@ with tab1:
             wb.save(excel_buffer)
             excel_buffer.seek(0)
             
-            # [2] 고급 워드 보고서 생성 (셀 병합 시 엔터키 중복 문제 해결)
+            # [2] 고급 워드 보고서 생성 
             doc = Document()
             
             style = doc.styles['Normal']
@@ -388,7 +393,7 @@ with tab1:
                         for i, h_text in enumerate(headers):
                             style_cell(table.cell(0, i), h_text, bg_color="D9E1F2", bold=True)
                             
-                        # 2. 로우 데이터 작성 (병합 대상인 1열과 3열은 반복문에서 아예 건드리지 않음)
+                        # 2. 로우 데이터 작성
                         for i, (val, pf_status) in enumerate(m['raw_data']):
                             r_idx = i + 1
                             style_cell(table.cell(r_idx, 0), str(i + 1))
@@ -396,7 +401,7 @@ with tab1:
                             style_cell(table.cell(r_idx, 4), f"{val:g}") 
                             style_cell(table.cell(r_idx, 5), pf_status)
                             
-                        # 빈 줄 없이 깔끔하게 병합 후 텍스트 지정 (엔터키 완벽 차단)
+                        # 빈 줄 없이 깔끔하게 병합 후 텍스트 지정 
                         if num_samples > 1:
                             cell_art = table.cell(1, 1).merge(table.cell(num_samples, 1))
                             cell_crit = table.cell(1, 3).merge(table.cell(num_samples, 3))
