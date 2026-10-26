@@ -257,7 +257,6 @@ with tab1:
                             
                         raw_criteria = ws.cell(row=crit_row, column=col).value
                         
-                        # ✨ [핵심 로직] 엑셀 셀의 소수점 자리수(표시 형식)를 분석합니다.
                         col_precision = None
                         col_has_comma = False
                         for dr in range(header_row + 1, mean_row):
@@ -272,7 +271,6 @@ with tab1:
                                     col_precision = 0
                                 break
                                 
-                        # 워드에 출력할 숫자를 엑셀 표시 형식에 맞게 문자열로 변환하는 헬퍼 함수
                         def fmt_val(v):
                             if col_precision is None: return f"{v:g}"
                             if col_has_comma: return f"{v:,.{col_precision}f}"
@@ -293,7 +291,7 @@ with tab1:
                                     if sample_idx < len(lot_list):
                                         lot_val = lot_list[sample_idx]
                                         
-                                data_cells.append((dr, val_float, fmt_val(val_float), lot_val)) # 포맷팅된 문자열도 함께 저장
+                                data_cells.append((dr, val_float, fmt_val(val_float), lot_val))
                                 
                         if not data: continue
                             
@@ -319,9 +317,12 @@ with tab1:
                                 if pct_val > 1: pct_float = pct_val / 100.0
                                 else: pct_float = float(pct_val)
                                 
-                            lower_limit = base_val * (1 - pct_float)
-                            upper_limit = base_val * (1 + pct_float)
-                            limit_text_clean = f"{fmt_val(lower_limit)} ~ {fmt_val(upper_limit)}"
+                            tolerance_val = base_val * pct_float
+                            lower_limit = base_val - tolerance_val
+                            upper_limit = base_val + tolerance_val
+                            
+                            # ✨ [핵심 변경] 치수 시험의 허용 기준(criteria)을 ± 기호로 출력
+                            limit_text_clean = f"{fmt_val(base_val)} ± {fmt_val(tolerance_val)}"
                             
                             failed_count = 0
                             for dr, val_float, val_str, lot_val in data_cells:
@@ -452,17 +453,15 @@ with tab1:
                         table = doc.add_table(rows=total_rows, cols=6)
                         table.style = 'Table Grid'
                         
-                        # 1. 헤더행 작성
                         headers = ["No", "Art no.", "Lot no.", "Acceptance criteria", "Results", "Pass / Fail"]
                         for i, h_text in enumerate(headers):
                             style_cell(table.cell(0, i), h_text, bg_color="D9E1F2", bold=True)
                             
-                        # 2. 로우 데이터 작성
                         for i, (val_str, pf_status, lot_str) in enumerate(m['raw_data']):
                             r_idx = i + 1
                             style_cell(table.cell(r_idx, 0), str(i + 1))
                             style_cell(table.cell(r_idx, 2), lot_str) 
-                            style_cell(table.cell(r_idx, 4), val_str) # ✨ 엑셀과 동일한 소수점 포맷 반영!
+                            style_cell(table.cell(r_idx, 4), val_str) 
                             style_cell(table.cell(r_idx, 5), pf_status)
                             
                         if num_samples > 1:
@@ -474,7 +473,6 @@ with tab1:
                             style_cell(table.cell(1, 1), m['model'])
                             style_cell(table.cell(1, 3), m['criteria'])
                             
-                        # 3. 하단 요약 데이터 작성
                         def add_summary(row_idx, label, value_str):
                             table.cell(row_idx, 0).merge(table.cell(row_idx, 3))
                             table.cell(row_idx, 4).merge(table.cell(row_idx, 5))
@@ -495,7 +493,6 @@ with tab1:
             doc.save(docx_buffer)
             docx_buffer.seek(0)
 
-            # [3] 화면 하단 다운로드 버튼
             st.markdown("### 🎉 분석 완료!")
             dl_col1, dl_col2 = st.columns(2)
             with dl_col1:
@@ -503,9 +500,6 @@ with tab1:
             with dl_col2:
                 st.download_button("📄 고급 워드(Word) 보고서 다운로드", data=docx_buffer, file_name="스텐트_보고서_최종.docx", use_container_width=True)
 
-# =========================================================
-# 탭 2: 신규 데이터 생성기 코드 (기존과 동일)
-# =========================================================
 with tab2:
     st.markdown("### 🎲 원하는 평균/표준편차로 데이터 추출")
     st.info("입력하신 목표치에 100% 일치하도록 보정(Scaling)된 가상의 데이터를 엑셀로 생성합니다.")
