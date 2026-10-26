@@ -14,7 +14,7 @@ import re
 
 # 워드(Word) 생성을 위한 라이브러리
 from docx import Document
-from docx.shared import Pt  # 폰트 사이즈 지정을 위해 추가
+from docx.shared import Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_ALIGN_VERTICAL
 from docx.oxml.ns import nsdecls
@@ -25,14 +25,14 @@ def set_cell_bg(cell, fill="D9E1F2"):
     cell._tc.get_or_add_tcPr().append(shading_elm)
 
 def style_cell(cell, text, bg_color=None, bold=False):
-    cell.text = str(text)
+    cell.text = str(text) # 기존 텍스트(엔터키 포함)를 완전히 밀어버리고 새로 작성
     if bg_color:
         set_cell_bg(cell, bg_color)
     for p in cell.paragraphs:
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         for run in p.runs:
-            run.font.name = 'Times New Roman'  # 폰트 강제 지정
-            run.font.size = Pt(9)              # 사이즈 9 강제 지정
+            run.font.name = 'Times New Roman'
+            run.font.size = Pt(9)
             run.font.bold = bold
     cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
 
@@ -352,16 +352,14 @@ with tab1:
             wb.save(excel_buffer)
             excel_buffer.seek(0)
             
-            # [2] 고급 워드 보고서 생성 (전체 폰트 Times New Roman, 사이즈 9 고정)
+            # [2] 고급 워드 보고서 생성 (셀 병합 시 엔터키 중복 문제 해결)
             doc = Document()
             
-            # 문서 전체 기본 폰트 설정
             style = doc.styles['Normal']
             font = style.font
             font.name = 'Times New Roman'
             font.size = Pt(9)
             
-            # 제목용 스타일 강제 설정
             title_p = doc.add_heading('스텐트 성능 및 치수 시험 보고서', 0)
             for run in title_p.runs:
                 run.font.name = 'Times New Roman'
@@ -390,7 +388,7 @@ with tab1:
                         for i, h_text in enumerate(headers):
                             style_cell(table.cell(0, i), h_text, bg_color="D9E1F2", bold=True)
                             
-                        # 2. 로우 데이터 작성
+                        # 2. 로우 데이터 작성 (병합 대상인 1열과 3열은 반복문에서 아예 건드리지 않음)
                         for i, (val, pf_status) in enumerate(m['raw_data']):
                             r_idx = i + 1
                             style_cell(table.cell(r_idx, 0), str(i + 1))
@@ -398,18 +396,15 @@ with tab1:
                             style_cell(table.cell(r_idx, 4), f"{val:g}") 
                             style_cell(table.cell(r_idx, 5), pf_status)
                             
-                            # 병합할 열은 첫 번째 칸에만 씀
-                            if i == 0:
-                                style_cell(table.cell(r_idx, 1), m['model'])
-                                style_cell(table.cell(r_idx, 3), m['criteria'])
-                            else:
-                                table.cell(r_idx, 1).text = ""
-                                table.cell(r_idx, 3).text = ""
-                            
-                        # 셀 병합 실행
+                        # 빈 줄 없이 깔끔하게 병합 후 텍스트 지정 (엔터키 완벽 차단)
                         if num_samples > 1:
-                            table.cell(1, 1).merge(table.cell(num_samples, 1))
-                            table.cell(1, 3).merge(table.cell(num_samples, 3))
+                            cell_art = table.cell(1, 1).merge(table.cell(num_samples, 1))
+                            cell_crit = table.cell(1, 3).merge(table.cell(num_samples, 3))
+                            style_cell(cell_art, m['model'])
+                            style_cell(cell_crit, m['criteria'])
+                        elif num_samples == 1:
+                            style_cell(table.cell(1, 1), m['model'])
+                            style_cell(table.cell(1, 3), m['criteria'])
                             
                         # 3. 하단 요약 데이터 작성
                         def add_summary(row_idx, label, value):
@@ -441,7 +436,7 @@ with tab1:
                 st.download_button("📄 고급 워드(Word) 보고서 다운로드", data=docx_buffer, file_name="스텐트_보고서_최종.docx", use_container_width=True)
 
 # =========================================================
-# 탭 2: 신규 데이터 생성기 코드 (기존과 동일)
+# 탭 2: 신규 데이터 생성기 코드
 # =========================================================
 with tab2:
     st.markdown("### 🎲 원하는 평균/표준편차로 데이터 추출")
