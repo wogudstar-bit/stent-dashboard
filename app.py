@@ -123,10 +123,11 @@ with tab1:
         ax4.text(0.1, 0.95, stats_text, va='top', ha='left', fontsize=9, family='monospace')
         plt.tight_layout()
         
+        # ✨ 엑셀/워드 충돌 방지를 위해 이미지 바이트(Raw Data)로 복사해서 추출
         img_buffer = io.BytesIO()
         plt.savefig(img_buffer, format='png', dpi=150)
-        img_buffer.seek(0)
-        return fig, img_buffer
+        img_bytes = img_buffer.getvalue()
+        return fig, img_bytes
 
     uploaded_file = st.file_uploader("검사 결과 엑셀 파일(빈 양식)을 이곳에 끌어다 놓으세요.", type=['xlsx'])
     if uploaded_file is not None:
@@ -305,7 +306,7 @@ with tab1:
                             "mean_str": fmt_val(mean_val),
                             "std_str": fmt_val(std_val),
                             "raw_data": [],
-                            "plot_img": None # 그래프 이미지를 담을 변수 추가
+                            "plot_bytes": None # 에러 방지용 바이트 저장 변수
                         }
 
                         if is_dimensional:
@@ -400,14 +401,15 @@ with tab1:
                             result_dict["k_val_str"] = bound_text
                             result_dict["p_val_str"] = f"{p_val:.3f}"
 
-                            fig, img_buffer = create_minitab_plot(np.array(data), model_name)
-                            # 워드 삽입용 그래프 캡처 (BytesIO)
-                            result_dict["plot_img"] = img_buffer
+                            # ✨ 복사본(Bytes)을 생성하여 전달
+                            fig, img_bytes = create_minitab_plot(np.array(data), model_name)
+                            result_dict["plot_bytes"] = img_bytes
                             
-                            img = OpenpyxlImage(img_buffer)
-                            img.width, img.height = int(9.6 * 37.8), int(6.2 * 37.8)
+                            # 엑셀에는 복사본 A를 전달
+                            img_for_excel = OpenpyxlImage(io.BytesIO(img_bytes))
+                            img_for_excel.width, img_for_excel.height = int(9.6 * 37.8), int(6.2 * 37.8)
                             c_letter = get_column_letter(img_insert_col)
-                            ws.add_image(img, f"{c_letter}{header_row}")
+                            ws.add_image(img_for_excel, f"{c_letter}{header_row}")
                             img_insert_col += 6
                             
                             with cols[col_idx % len(cols)]:
@@ -505,27 +507,25 @@ with tab1:
                             run.font.name = 'Times New Roman'
                             run.font.size = Pt(9)
                             
-                        # 그래프를 2열(가로 2개)로 배치하기 위해 수학적 계산
                         num_plots = len(models)
                         num_rows = (num_plots + 1) // 2
                         
                         img_table = doc.add_table(rows=num_rows, cols=2)
-                        img_table.style = 'Table Grid'
                         
                         plot_idx = 0
                         for row_idx in range(num_rows):
                             for col_idx in range(2):
                                 if plot_idx < num_plots:
                                     cell = img_table.cell(row_idx, col_idx)
-                                    img_buf = models[plot_idx]["plot_img"]
+                                    # ✨ 워드에는 복사본 B를 전달 (io.BytesIO로 새로 감싸서 전달)
+                                    img_buf = io.BytesIO(models[plot_idx]["plot_bytes"])
                                     
-                                    # 셀 안에 이미지 삽입 (가로폭 약 8cm로 조정)
                                     p = cell.paragraphs[0]
                                     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                                     run = p.add_run()
                                     run.add_picture(img_buf, width=Cm(8.0))
                                 plot_idx += 1
-                        doc.add_paragraph() # 시험 묶음 끝 구분을 위한 여백
+                        doc.add_paragraph()
 
             docx_buffer = io.BytesIO()
             doc.save(docx_buffer)
