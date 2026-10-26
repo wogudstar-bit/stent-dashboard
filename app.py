@@ -14,7 +14,7 @@ import re
 
 # 워드(Word) 생성을 위한 라이브러리
 from docx import Document
-from docx.shared import Pt
+from docx.shared import Pt, Cm  # Cm 단위 추가
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_ALIGN_VERTICAL
 from docx.oxml.ns import nsdecls
@@ -321,7 +321,6 @@ with tab1:
                             lower_limit = base_val - tolerance_val
                             upper_limit = base_val + tolerance_val
                             
-                            # ✨ [핵심 변경] 치수 시험의 허용 기준(criteria)을 ± 기호로 출력
                             limit_text_clean = f"{fmt_val(base_val)} ± {fmt_val(tolerance_val)}"
                             
                             failed_count = 0
@@ -452,6 +451,10 @@ with tab1:
                         total_rows = 1 + num_samples + summary_rows_count
                         table = doc.add_table(rows=total_rows, cols=6)
                         table.style = 'Table Grid'
+                        
+                        # ✨ 표의 모든 셀 높이를 0.5cm로 설정
+                        for row in table.rows:
+                            row.height = Cm(0.5)
                         
                         headers = ["No", "Art no.", "Lot no.", "Acceptance criteria", "Results", "Pass / Fail"]
                         for i, h_text in enumerate(headers):
