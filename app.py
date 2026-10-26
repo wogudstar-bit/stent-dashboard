@@ -11,8 +11,27 @@ import scipy.stats as stats
 from statsmodels.stats.diagnostic import normal_ad
 import io
 import re
-import os
-from docxtpl import DocxTemplate # 새로 추가된 강력한 템플릿 라이브러리
+
+# 워드(Word) 생성을 위한 라이브러리 (템플릿 없이 직접 그림)
+from docx import Document
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.table import WD_ALIGN_VERTICAL
+from docx.oxml.ns import nsdecls
+from docx.oxml import parse_xml
+
+def set_cell_bg(cell, fill="D9E1F2"):
+    shading_elm = parse_xml(r'<w:shd {} w:fill="{}"/>'.format(nsdecls('w'), fill))
+    cell._tc.get_or_add_tcPr().append(shading_elm)
+
+def style_cell(cell, text, bg_color=None, bold=False):
+    cell.text = str(text)
+    if bg_color:
+        set_cell_bg(cell, bg_color)
+    for p in cell.paragraphs:
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        for run in p.runs:
+            run.font.bold = bold
+    cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
 
 st.set_page_config(page_title="스텐트 성능 분석", layout="wide")
 st.title("📊 스텐트 자동 분석 & 데이터 생성 대시보드")
@@ -157,17 +176,18 @@ with tab1:
                 grouped_blocks[m_name].append(block)
                 
             st.success(f"✅ 총 **{len(grouped_blocks)}개**의 시험 항목 분석 시작...")
-            
-            # 워드 템플릿에 넘겨줄 '결과 리스트' 생성
-            doc_results = []
+            report_data = {}
 
             for main_name, sub_blocks in grouped_blocks.items():
                 st.markdown(f"## 📌 {main_name}")
+                report_data[main_name] = {} 
                 
                 for block in sub_blocks:
                     mean_row = block['mean_row']
                     header_row = block['header_row']
                     test_name = str(ws.cell(row=header_row, column=1).value)
+                    
+                    report_data[main_name][test_name] = [] 
                     
                     last_col = 2
                     while ws.cell(row=header_row, column=last_col).value is not None: last_col += 1
@@ -186,6 +206,7 @@ with tab1:
 
                     mode_text = "📏 치수 시험" if is_dimensional else "📈 성능 시험"
                     st.markdown(f"#### ↳ 🧪 {test_name} ({mode_text})")
+                    
                     cols = st.columns(max(1, last_col - 1))
                     col_idx = 0
                     img_insert_col = max(7, last_col + 2)
@@ -210,8 +231,14 @@ with tab1:
                         mean_val = np.mean(data)
                         std_val = np.std(data, ddof=1)
                         
-                        raw_data_list = [] # 워드에 넣을 로우데이터 딕셔너리
-                        
+                        result_dict = {
+                            "model": model_name,
+                            "is_dimensional": is_dimensional,
+                            "mean": round(mean_val, 1),
+                            "std": round(std_val, 1),
+                            "raw_data": []
+                        }
+
                         if is_dimensional:
                             try: base_val = float(str(raw_criteria).replace(',', ''))
                             except: base_val = 0.0
@@ -226,7 +253,6 @@ with tab1:
                             lower_limit = base_val * (1 - pct_float)
                             upper_limit = base_val * (1 + pct_float)
                             limit_text_clean = f"{round(lower_limit, 2)} ~ {round(upper_limit, 2)}"
-                            k_label, bound_text, p_val_str = "-", "-", "-"
                             
                             failed_count = 0
                             for dr, val_float in data_cells:
@@ -234,13 +260,18 @@ with tab1:
                                 if not is_val_pass:
                                     ws.cell(row=dr, column=col).fill = pink_fill
                                     failed_count += 1
-                                raw_data_list.append({"no": len(raw_data_list)+1, "val": f"{val_float:g}", "pf": "Pass" if is_val_pass else "Fail"})
+                                result_dict["raw_data"].append((val_float, "Pass" if is_val_pass else "Fail"))
                                     
                             mean_cell = ws.cell(row=mean_row, column=col)
                             mean_cell.value = round(mean_val, 2)
                             is_mean_pass = (lower_limit <= mean_val <= upper_limit)
                             if not is_mean_pass: mean_cell.fill = pink_fill
                             ws.cell(row=mean_row+1, column=col).value = round(std_val, 2)
+                            
+                            result_dict["criteria"] = limit_text_clean
+                            result_dict["k_label"] = "-"
+                            result_dict["k_val"] = "-"
+                            result_dict["p_val"] = "-"
                             
                             with cols[col_idx % len(cols)]:
                                 st.markdown(f"**{model_name}**")
@@ -255,7 +286,7 @@ with tab1:
                             for dr, val_float in data_cells:
                                 is_val_pass = check_data_pass(val_float, operator, limit)
                                 if not is_val_pass: ws.cell(row=dr, column=col).fill = pink_fill
-                                raw_data_list.append({"no": len(raw_data_list)+1, "val": f"{val_float:g}", "pf": "Pass" if is_val_pass else "Fail"})
+                                result_dict["raw_data"].append((val_float, "Pass" if is_val_pass else "Fail"))
                                     
                             stat, p_val = normal_ad(np.array(data))
                             
@@ -290,7 +321,10 @@ with tab1:
                             cell_p.value = round(p_val, 3)
                             if p_val <= 0.05: cell_p.fill = pink_fill
                             
-                            p_val_str = str(round(p_val, 3))
+                            result_dict["criteria"] = limit_text_clean
+                            result_dict["k_label"] = k_label
+                            result_dict["k_val"] = bound_text
+                            result_dict["p_val"] = round(p_val, 3)
 
                             fig, img_buffer = create_minitab_plot(np.array(data), model_name)
                             img = OpenpyxlImage(img_buffer)
@@ -306,52 +340,87 @@ with tab1:
                                 else: st.error(f"❌ **K값 불합격:** {bound_text}")
                             plt.close(fig) 
                             
-                        # 워드 템플릿에 전달할 1개 모델의 최종 데이터 세트
-                        doc_results.append({
-                            "main_test": main_name,
-                            "sub_test": test_name,
-                            "model": model_name,
-                            "criteria": limit_text_clean,
-                            "raw_data": raw_data_list,
-                            "mean": round(mean_val, 1),
-                            "std": round(std_val, 1),
-                            "k_label": k_label,
-                            "k_val": bound_text,
-                            "p_val": p_val_str
-                        })
+                        report_data[main_name][test_name].append(result_dict)
                         col_idx += 1
                         
                 st.divider()
 
-            # [1] 엑셀 파일 버퍼 저장
             excel_buffer = io.BytesIO()
             wb.save(excel_buffer)
             excel_buffer.seek(0)
             
-            # [2] 워드 템플릿 렌더링
-            docx_buffer = None
-            if os.path.exists("report_template.docx"):
-                try:
-                    doc = DocxTemplate("report_template.docx")
-                    doc.render({"results": doc_results}) # 템플릿에 데이터 밀어넣기
-                    docx_buffer = io.BytesIO()
-                    doc.save(docx_buffer)
-                    docx_buffer.seek(0)
-                except Exception as e:
-                    st.error(f"템플릿 렌더링 중 오류가 발생했습니다: {e}")
-            else:
-                st.warning("⚠️ 깃허브에 'report_template.docx' 파일이 존재하지 않아 워드 보고서를 생성할 수 없습니다.")
+            # [2] 고급 워드 보고서 생성 (파이썬 코딩 방식, 글자 중복 완벽 해결 버전)
+            doc = Document()
+            doc.add_heading('스텐트 성능 및 치수 시험 보고서', 0)
+            
+            for main_name, sub_tests in report_data.items():
+                for test_name, models in sub_tests.items():
+                    if not models: continue
+                    doc.add_heading(f"■ {main_name} - {test_name}", level=2)
+                    
+                    for m in models:
+                        num_samples = len(m['raw_data'])
+                        is_perf = not m['is_dimensional']
+                        
+                        summary_rows_count = 4 if is_perf else 2
+                        total_rows = 1 + num_samples + summary_rows_count
+                        table = doc.add_table(rows=total_rows, cols=6)
+                        table.style = 'Table Grid'
+                        
+                        # 1. 헤더행 작성
+                        headers = ["No", "Art no.", "Lot no.", "Acceptance criteria", "Results", "Pass / Fail"]
+                        for i, h_text in enumerate(headers):
+                            style_cell(table.cell(0, i), h_text, bg_color="D9E1F2", bold=True)
+                            
+                        # 2. 로우 데이터 작성 (병합될 셀에는 첫 번째 행에만 글씨 쓰기)
+                        for i, (val, pf_status) in enumerate(m['raw_data']):
+                            r_idx = i + 1
+                            style_cell(table.cell(r_idx, 0), str(i + 1))
+                            style_cell(table.cell(r_idx, 2), "-")
+                            style_cell(table.cell(r_idx, 4), f"{val:g}") 
+                            style_cell(table.cell(r_idx, 5), pf_status)
+                            
+                            # 병합할 열(Art no, Criteria)은 첫 번째 칸에만 쓰고 나머지는 빈칸 유지
+                            if i == 0:
+                                style_cell(table.cell(r_idx, 1), m['model'])
+                                style_cell(table.cell(r_idx, 3), m['criteria'])
+                            else:
+                                table.cell(r_idx, 1).text = ""
+                                table.cell(r_idx, 3).text = ""
+                            
+                        # 셀 병합 실행
+                        if num_samples > 1:
+                            table.cell(1, 1).merge(table.cell(num_samples, 1))
+                            table.cell(1, 3).merge(table.cell(num_samples, 3))
+                            
+                        # 3. 하단 요약 데이터 작성
+                        def add_summary(row_idx, label, value):
+                            table.cell(row_idx, 0).merge(table.cell(row_idx, 3))
+                            table.cell(row_idx, 4).merge(table.cell(row_idx, 5))
+                            style_cell(table.cell(row_idx, 0), label, bg_color="D9E1F2")
+                            style_cell(table.cell(row_idx, 4), str(value), bg_color="D9E1F2", bold=True)
+                            
+                        sum_start = num_samples + 1
+                        add_summary(sum_start, "Average", m['mean'])
+                        add_summary(sum_start + 1, "Standard deviation", m['std'])
+                        
+                        if is_perf:
+                            add_summary(sum_start + 2, m['k_label'], m['k_val'])
+                            add_summary(sum_start + 3, "p-value (Normality Test)", m['p_val'])
+                            
+                        doc.add_paragraph()
 
-            # [3] 다운로드 버튼
+            docx_buffer = io.BytesIO()
+            doc.save(docx_buffer)
+            docx_buffer.seek(0)
+
+            # [3] 화면 하단 다운로드 버튼
             st.markdown("### 🎉 분석 완료!")
             dl_col1, dl_col2 = st.columns(2)
             with dl_col1:
                 st.download_button("📊 결과 엑셀 다운로드", data=excel_buffer, file_name="스텐트_전체성능분석_완료.xlsx", use_container_width=True)
             with dl_col2:
-                if docx_buffer:
-                    st.download_button("📄 워드(Word) 성적서 다운로드", data=docx_buffer, file_name="스텐트_보고서_최종.docx", use_container_width=True)
-                else:
-                    st.button("📄 워드(Word) 성적서 다운로드", disabled=True, use_container_width=True)
+                st.download_button("📄 고급 워드(Word) 보고서 다운로드", data=docx_buffer, file_name="스텐트_보고서_최종.docx", use_container_width=True)
 
 # =========================================================
 # 탭 2: 신규 데이터 생성기 코드 (기존과 동일)
