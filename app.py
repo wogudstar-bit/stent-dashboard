@@ -12,7 +12,6 @@ from statsmodels.stats.diagnostic import normal_ad
 import io
 import re
 
-# 워드(Word) 생성을 위한 라이브러리
 from docx import Document
 from docx.shared import Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -133,7 +132,6 @@ with tab1:
         wb = openpyxl.load_workbook(uploaded_file)
         ws = wb.active
         
-        # ✨ [핵심 추가] Lot 탭(시트)을 읽어서 딕셔너리로 저장하는 로직
         lot_dict = {}
         if "Lot" in wb.sheetnames:
             ws_lot = wb["Lot"]
@@ -146,7 +144,6 @@ with tab1:
                 if str_a == "Lot 정보": continue
                 
                 if str_a.isdigit():
-                    # 시료 번호(1, 2, 3...) 행인 경우
                     idx = int(str_a) - 1
                     if current_test_in_lot:
                         for i, m_name in enumerate(current_models_in_lot):
@@ -156,7 +153,6 @@ with tab1:
                                     lot_dict[current_test_in_lot][m_name].append("-")
                                 lot_dict[current_test_in_lot][m_name][idx] = str(lot_val).strip()
                 else:
-                    # 시험명(BTR 등) 행인 경우
                     current_test_in_lot = str_a
                     if current_test_in_lot not in lot_dict:
                         lot_dict[current_test_in_lot] = {}
@@ -268,7 +264,6 @@ with tab1:
                                 val_float = float(str(d_val).replace(',', ''))
                                 data.append(val_float)
                                 
-                                # ✨ [핵심 추가] Lot 딕셔너리에서 로트 번호 조회
                                 sample_idx = dr - header_row - 1
                                 lot_val = "-"
                                 if test_name_clean in lot_dict and model_name_clean in lot_dict[test_name_clean]:
@@ -304,7 +299,7 @@ with tab1:
                                 
                             lower_limit = base_val * (1 - pct_float)
                             upper_limit = base_val * (1 + pct_float)
-                            limit_text_clean = f"{round(lower_limit, 2)} ~ {round(upper_limit, 2)}"
+                            limit_text_clean = f"{round(lower_limit, 1)} ~ {round(upper_limit, 1)}"
                             
                             failed_count = 0
                             for dr, val_float, lot_val in data_cells:
@@ -361,8 +356,8 @@ with tab1:
                                 
                                 op_map = {'<=': '≤', '>=': '≥', '<': '<', '>': '>'}
                                 display_op = op_map.get(operator, operator)
-                                limit_display = int(limit) if limit.is_integer() else limit
-                                limit_text_clean = f"{display_op} {limit_display}"
+                                limit_display = float(limit)
+                                limit_text_clean = f"{display_op} {limit_display:.1f}"
                             
                             mean_cell = ws.cell(row=mean_row, column=col)
                             mean_cell.value = round(mean_val, 2)
@@ -405,7 +400,7 @@ with tab1:
             wb.save(excel_buffer)
             excel_buffer.seek(0)
             
-            # [2] 고급 워드 보고서 생성
+            # [2] 고급 워드 보고서 생성 
             doc = Document()
             
             style = doc.styles['Normal']
@@ -445,8 +440,9 @@ with tab1:
                         for i, (val, pf_status, lot_str) in enumerate(m['raw_data']):
                             r_idx = i + 1
                             style_cell(table.cell(r_idx, 0), str(i + 1))
-                            style_cell(table.cell(r_idx, 2), lot_str) # Lot 시트에서 가져온 값 매핑!
-                            style_cell(table.cell(r_idx, 4), f"{val:g}") 
+                            style_cell(table.cell(r_idx, 2), lot_str) 
+                            # ✨ [핵심 변경] 숫자를 무조건 소수점 2자리로 강제 고정 (예: 20 -> 20.00)
+                            style_cell(table.cell(r_idx, 4), f"{val:.2f}") 
                             style_cell(table.cell(r_idx, 5), pf_status)
                             
                         if num_samples > 1:
@@ -463,7 +459,9 @@ with tab1:
                             table.cell(row_idx, 0).merge(table.cell(row_idx, 3))
                             table.cell(row_idx, 4).merge(table.cell(row_idx, 5))
                             style_cell(table.cell(row_idx, 0), label, bg_color="D9E1F2")
-                            style_cell(table.cell(row_idx, 4), str(value), bg_color="D9E1F2", bold=True)
+                            # ✨ 요약값은 소수점 1자리로 고정 (필요시 .1f 를 .2f 로 변경 가능)
+                            val_str = f"{value:.1f}" if isinstance(value, (int, float)) else str(value)
+                            style_cell(table.cell(row_idx, 4), val_str, bg_color="D9E1F2", bold=True)
                             
                         sum_start = num_samples + 1
                         add_summary(sum_start, "Average", m['mean'])
@@ -471,7 +469,8 @@ with tab1:
                         
                         if is_perf:
                             add_summary(sum_start + 2, m['k_label'], m['k_val'])
-                            add_summary(sum_start + 3, "p-value (Normality Test)", m['p_val'])
+                            # p-value는 관행상 3자리 고정
+                            add_summary(sum_start + 3, "p-value (Normality Test)", f"{m['p_val']:.3f}" if isinstance(m['p_val'], (int, float)) else m['p_val'])
                             
                         doc.add_paragraph()
 
@@ -488,7 +487,7 @@ with tab1:
                 st.download_button("📄 고급 워드(Word) 보고서 다운로드", data=docx_buffer, file_name="스텐트_보고서_최종.docx", use_container_width=True)
 
 # =========================================================
-# 탭 2: 신규 데이터 생성기 코드 (기존과 동일)
+# 탭 2: 신규 데이터 생성기 코드
 # =========================================================
 with tab2:
     st.markdown("### 🎲 원하는 평균/표준편차로 데이터 추출")
