@@ -12,6 +12,7 @@ from statsmodels.stats.diagnostic import normal_ad
 import io
 import re
 
+# 워드(Word) 생성을 위한 라이브러리
 from docx import Document
 from docx.shared import Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -256,6 +257,27 @@ with tab1:
                             
                         raw_criteria = ws.cell(row=crit_row, column=col).value
                         
+                        # ✨ [핵심 로직] 엑셀 셀의 소수점 자리수(표시 형식)를 분석합니다.
+                        col_precision = None
+                        col_has_comma = False
+                        for dr in range(header_row + 1, mean_row):
+                            cell = ws.cell(row=dr, column=col)
+                            if cell.value is not None:
+                                fmt = str(cell.number_format)
+                                match = re.search(r'\.(0+)', fmt)
+                                col_has_comma = ',' in fmt
+                                if match:
+                                    col_precision = len(match.group(1))
+                                elif fmt != 'General' and ('0' in fmt or '#' in fmt):
+                                    col_precision = 0
+                                break
+                                
+                        # 워드에 출력할 숫자를 엑셀 표시 형식에 맞게 문자열로 변환하는 헬퍼 함수
+                        def fmt_val(v):
+                            if col_precision is None: return f"{v:g}"
+                            if col_has_comma: return f"{v:,.{col_precision}f}"
+                            return f"{v:.{col_precision}f}"
+                        
                         data_cells = []
                         data = []
                         for dr in range(header_row + 1, mean_row):
@@ -271,7 +293,7 @@ with tab1:
                                     if sample_idx < len(lot_list):
                                         lot_val = lot_list[sample_idx]
                                         
-                                data_cells.append((dr, val_float, lot_val))
+                                data_cells.append((dr, val_float, fmt_val(val_float), lot_val)) # 포맷팅된 문자열도 함께 저장
                                 
                         if not data: continue
                             
@@ -281,8 +303,8 @@ with tab1:
                         result_dict = {
                             "model": model_name,
                             "is_dimensional": is_dimensional,
-                            "mean": round(mean_val, 1),
-                            "std": round(std_val, 1),
+                            "mean_str": fmt_val(mean_val),
+                            "std_str": fmt_val(std_val),
                             "raw_data": []
                         }
 
@@ -299,15 +321,15 @@ with tab1:
                                 
                             lower_limit = base_val * (1 - pct_float)
                             upper_limit = base_val * (1 + pct_float)
-                            limit_text_clean = f"{round(lower_limit, 1)} ~ {round(upper_limit, 1)}"
+                            limit_text_clean = f"{fmt_val(lower_limit)} ~ {fmt_val(upper_limit)}"
                             
                             failed_count = 0
-                            for dr, val_float, lot_val in data_cells:
+                            for dr, val_float, val_str, lot_val in data_cells:
                                 is_val_pass = (lower_limit <= val_float <= upper_limit)
                                 if not is_val_pass:
                                     ws.cell(row=dr, column=col).fill = pink_fill
                                     failed_count += 1
-                                result_dict["raw_data"].append((val_float, "Pass" if is_val_pass else "Fail", lot_val))
+                                result_dict["raw_data"].append((val_str, "Pass" if is_val_pass else "Fail", lot_val))
                                     
                             mean_cell = ws.cell(row=mean_row, column=col)
                             mean_cell.value = round(mean_val, 2)
@@ -317,32 +339,32 @@ with tab1:
                             
                             result_dict["criteria"] = limit_text_clean
                             result_dict["k_label"] = "-"
-                            result_dict["k_val"] = "-"
-                            result_dict["p_val"] = "-"
+                            result_dict["k_val_str"] = "-"
+                            result_dict["p_val_str"] = "-"
                             
                             with cols[col_idx % len(cols)]:
                                 st.markdown(f"**{model_name}**")
-                                if is_mean_pass: st.write(f"✅ **평균:** {round(mean_val, 2)}")
-                                else: st.write(f"❌ **평균 미달:** {round(mean_val, 2)}")
-                                if failed_count > 0: st.error(f"❌ 불량 {failed_count}건 발생 ({limit_text_clean})")
-                                else: st.success(f"✅ 전수 통과 ({limit_text_clean})")
+                                if is_mean_pass: st.write(f"✅ **평균:** {fmt_val(mean_val)}")
+                                else: st.write(f"❌ **평균 미달:** {fmt_val(mean_val)}")
+                                if failed_count > 0: st.error(f"❌ 불량 {failed_count}건 발생")
+                                else: st.success(f"✅ 전수 통과")
                             
                         else:
                             operator, limit = parse_criteria(raw_criteria)
                             
-                            for dr, val_float, lot_val in data_cells:
+                            for dr, val_float, val_str, lot_val in data_cells:
                                 is_val_pass = check_data_pass(val_float, operator, limit)
                                 if not is_val_pass: ws.cell(row=dr, column=col).fill = pink_fill
-                                result_dict["raw_data"].append((val_float, "Pass" if is_val_pass else "Fail", lot_val))
+                                result_dict["raw_data"].append((val_str, "Pass" if is_val_pass else "Fail", lot_val))
                                     
                             stat, p_val = normal_ad(np.array(data))
                             
                             if operator == '~':
                                 ltl = mean_val - (k_val_two * std_val)
                                 utl = mean_val + (k_val_two * std_val)
-                                bound_text = f"{round(ltl, 2)} ~ {round(utl, 2)}"
+                                bound_text = f"{fmt_val(ltl)} ~ {fmt_val(utl)}"
                                 is_pass = (ltl >= limit[0]) and (utl <= limit[1])
-                                limit_text_clean = f"{limit[0]} ~ {limit[1]}"
+                                limit_text_clean = f"{fmt_val(limit[0])} ~ {fmt_val(limit[1])}"
                                 k_label = "LTL ~ UTL"
                             else:
                                 if operator in ['<=', '<']:
@@ -351,13 +373,12 @@ with tab1:
                                 else:
                                     bound_val = mean_val - (k_val_one * std_val)
                                     k_label = "Avg - k * stdev"
-                                bound_text = str(round(bound_val, 1))
+                                bound_text = fmt_val(bound_val)
                                 is_pass = check_data_pass(bound_val, operator, limit)
                                 
                                 op_map = {'<=': '≤', '>=': '≥', '<': '<', '>': '>'}
                                 display_op = op_map.get(operator, operator)
-                                limit_display = float(limit)
-                                limit_text_clean = f"{display_op} {limit_display:.1f}"
+                                limit_text_clean = f"{display_op} {fmt_val(limit)}"
                             
                             mean_cell = ws.cell(row=mean_row, column=col)
                             mean_cell.value = round(mean_val, 2)
@@ -374,8 +395,8 @@ with tab1:
                             
                             result_dict["criteria"] = limit_text_clean
                             result_dict["k_label"] = k_label
-                            result_dict["k_val"] = bound_text
-                            result_dict["p_val"] = round(p_val, 3)
+                            result_dict["k_val_str"] = bound_text
+                            result_dict["p_val_str"] = f"{p_val:.3f}"
 
                             fig, img_buffer = create_minitab_plot(np.array(data), model_name)
                             img = OpenpyxlImage(img_buffer)
@@ -386,7 +407,7 @@ with tab1:
                             
                             with cols[col_idx % len(cols)]:
                                 st.markdown(f"**{model_name}**")
-                                st.write(f"✅ **평균:** {round(mean_val, 2)}")
+                                st.write(f"✅ **평균:** {fmt_val(mean_val)}")
                                 if is_pass: st.success(f"✅ **K값:** {bound_text}")
                                 else: st.error(f"❌ **K값 불합격:** {bound_text}")
                             plt.close(fig) 
@@ -400,7 +421,7 @@ with tab1:
             wb.save(excel_buffer)
             excel_buffer.seek(0)
             
-            # [2] 고급 워드 보고서 생성 
+            # [2] 고급 워드 보고서 생성
             doc = Document()
             
             style = doc.styles['Normal']
@@ -437,12 +458,11 @@ with tab1:
                             style_cell(table.cell(0, i), h_text, bg_color="D9E1F2", bold=True)
                             
                         # 2. 로우 데이터 작성
-                        for i, (val, pf_status, lot_str) in enumerate(m['raw_data']):
+                        for i, (val_str, pf_status, lot_str) in enumerate(m['raw_data']):
                             r_idx = i + 1
                             style_cell(table.cell(r_idx, 0), str(i + 1))
                             style_cell(table.cell(r_idx, 2), lot_str) 
-                            # ✨ [핵심 변경] 숫자를 무조건 소수점 2자리로 강제 고정 (예: 20 -> 20.00)
-                            style_cell(table.cell(r_idx, 4), f"{val:.2f}") 
+                            style_cell(table.cell(r_idx, 4), val_str) # ✨ 엑셀과 동일한 소수점 포맷 반영!
                             style_cell(table.cell(r_idx, 5), pf_status)
                             
                         if num_samples > 1:
@@ -455,22 +475,19 @@ with tab1:
                             style_cell(table.cell(1, 3), m['criteria'])
                             
                         # 3. 하단 요약 데이터 작성
-                        def add_summary(row_idx, label, value):
+                        def add_summary(row_idx, label, value_str):
                             table.cell(row_idx, 0).merge(table.cell(row_idx, 3))
                             table.cell(row_idx, 4).merge(table.cell(row_idx, 5))
                             style_cell(table.cell(row_idx, 0), label, bg_color="D9E1F2")
-                            # ✨ 요약값은 소수점 1자리로 고정 (필요시 .1f 를 .2f 로 변경 가능)
-                            val_str = f"{value:.1f}" if isinstance(value, (int, float)) else str(value)
-                            style_cell(table.cell(row_idx, 4), val_str, bg_color="D9E1F2", bold=True)
+                            style_cell(table.cell(row_idx, 4), value_str, bg_color="D9E1F2", bold=True)
                             
                         sum_start = num_samples + 1
-                        add_summary(sum_start, "Average", m['mean'])
-                        add_summary(sum_start + 1, "Standard deviation", m['std'])
+                        add_summary(sum_start, "Average", m['mean_str'])
+                        add_summary(sum_start + 1, "Standard deviation", m['std_str'])
                         
                         if is_perf:
-                            add_summary(sum_start + 2, m['k_label'], m['k_val'])
-                            # p-value는 관행상 3자리 고정
-                            add_summary(sum_start + 3, "p-value (Normality Test)", f"{m['p_val']:.3f}" if isinstance(m['p_val'], (int, float)) else m['p_val'])
+                            add_summary(sum_start + 2, m['k_label'], m['k_val_str'])
+                            add_summary(sum_start + 3, "p-value (Normality Test)", m['p_val_str'])
                             
                         doc.add_paragraph()
 
@@ -487,7 +504,7 @@ with tab1:
                 st.download_button("📄 고급 워드(Word) 보고서 다운로드", data=docx_buffer, file_name="스텐트_보고서_최종.docx", use_container_width=True)
 
 # =========================================================
-# 탭 2: 신규 데이터 생성기 코드
+# 탭 2: 신규 데이터 생성기 코드 (기존과 동일)
 # =========================================================
 with tab2:
     st.markdown("### 🎲 원하는 평균/표준편차로 데이터 추출")
