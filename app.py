@@ -133,6 +133,44 @@ with tab1:
         wb = openpyxl.load_workbook(uploaded_file)
         ws = wb.active
         
+        # ✨ [핵심 추가] Lot 탭(시트)을 읽어서 딕셔너리로 저장하는 로직
+        lot_dict = {}
+        if "Lot" in wb.sheetnames:
+            ws_lot = wb["Lot"]
+            current_test_in_lot = None
+            current_models_in_lot = []
+            for r in range(1, ws_lot.max_row + 1):
+                val_a = ws_lot.cell(row=r, column=1).value
+                if val_a is None: continue
+                str_a = str(val_a).strip()
+                if str_a == "Lot 정보": continue
+                
+                if str_a.isdigit():
+                    # 시료 번호(1, 2, 3...) 행인 경우
+                    idx = int(str_a) - 1
+                    if current_test_in_lot:
+                        for i, m_name in enumerate(current_models_in_lot):
+                            lot_val = ws_lot.cell(row=r, column=i+2).value
+                            if lot_val is not None:
+                                while len(lot_dict[current_test_in_lot][m_name]) <= idx:
+                                    lot_dict[current_test_in_lot][m_name].append("-")
+                                lot_dict[current_test_in_lot][m_name][idx] = str(lot_val).strip()
+                else:
+                    # 시험명(BTR 등) 행인 경우
+                    current_test_in_lot = str_a
+                    if current_test_in_lot not in lot_dict:
+                        lot_dict[current_test_in_lot] = {}
+                    current_models_in_lot = []
+                    c = 2
+                    while True:
+                        m_val = ws_lot.cell(row=r, column=c).value
+                        if not m_val: break
+                        m_str = str(m_val).strip()
+                        current_models_in_lot.append(m_str)
+                        if m_str not in lot_dict[current_test_in_lot]:
+                            lot_dict[current_test_in_lot][m_str] = []
+                        c += 1
+        
         try:
             k_val_one = float(ws['D2'].value)
             k_val_two = float(ws['E2'].value)
@@ -189,6 +227,7 @@ with tab1:
                     mean_row = block['mean_row']
                     header_row = block['header_row']
                     test_name = str(ws.cell(row=header_row, column=1).value)
+                    test_name_clean = test_name.strip()
                     
                     report_data[main_name][test_name] = [] 
                     
@@ -217,6 +256,7 @@ with tab1:
                     for col in range(2, last_col + 1):
                         model_name = ws.cell(row=header_row, column=col).value
                         if not model_name: continue
+                        model_name_clean = str(model_name).strip()
                             
                         raw_criteria = ws.cell(row=crit_row, column=col).value
                         
@@ -227,7 +267,16 @@ with tab1:
                             if d_val is not None:
                                 val_float = float(str(d_val).replace(',', ''))
                                 data.append(val_float)
-                                data_cells.append((dr, val_float))
+                                
+                                # ✨ [핵심 추가] Lot 딕셔너리에서 로트 번호 조회
+                                sample_idx = dr - header_row - 1
+                                lot_val = "-"
+                                if test_name_clean in lot_dict and model_name_clean in lot_dict[test_name_clean]:
+                                    lot_list = lot_dict[test_name_clean][model_name_clean]
+                                    if sample_idx < len(lot_list):
+                                        lot_val = lot_list[sample_idx]
+                                        
+                                data_cells.append((dr, val_float, lot_val))
                                 
                         if not data: continue
                             
@@ -258,12 +307,12 @@ with tab1:
                             limit_text_clean = f"{round(lower_limit, 2)} ~ {round(upper_limit, 2)}"
                             
                             failed_count = 0
-                            for dr, val_float in data_cells:
+                            for dr, val_float, lot_val in data_cells:
                                 is_val_pass = (lower_limit <= val_float <= upper_limit)
                                 if not is_val_pass:
                                     ws.cell(row=dr, column=col).fill = pink_fill
                                     failed_count += 1
-                                result_dict["raw_data"].append((val_float, "Pass" if is_val_pass else "Fail"))
+                                result_dict["raw_data"].append((val_float, "Pass" if is_val_pass else "Fail", lot_val))
                                     
                             mean_cell = ws.cell(row=mean_row, column=col)
                             mean_cell.value = round(mean_val, 2)
@@ -286,10 +335,10 @@ with tab1:
                         else:
                             operator, limit = parse_criteria(raw_criteria)
                             
-                            for dr, val_float in data_cells:
+                            for dr, val_float, lot_val in data_cells:
                                 is_val_pass = check_data_pass(val_float, operator, limit)
                                 if not is_val_pass: ws.cell(row=dr, column=col).fill = pink_fill
-                                result_dict["raw_data"].append((val_float, "Pass" if is_val_pass else "Fail"))
+                                result_dict["raw_data"].append((val_float, "Pass" if is_val_pass else "Fail", lot_val))
                                     
                             stat, p_val = normal_ad(np.array(data))
                             
@@ -310,7 +359,6 @@ with tab1:
                                 bound_text = str(round(bound_val, 1))
                                 is_pass = check_data_pass(bound_val, operator, limit)
                                 
-                                # ✨ [수학 기호 변환 로직 적용]
                                 op_map = {'<=': '≤', '>=': '≥', '<': '<', '>': '>'}
                                 display_op = op_map.get(operator, operator)
                                 limit_display = int(limit) if limit.is_integer() else limit
@@ -357,7 +405,7 @@ with tab1:
             wb.save(excel_buffer)
             excel_buffer.seek(0)
             
-            # [2] 고급 워드 보고서 생성 
+            # [2] 고급 워드 보고서 생성
             doc = Document()
             
             style = doc.styles['Normal']
@@ -394,14 +442,13 @@ with tab1:
                             style_cell(table.cell(0, i), h_text, bg_color="D9E1F2", bold=True)
                             
                         # 2. 로우 데이터 작성
-                        for i, (val, pf_status) in enumerate(m['raw_data']):
+                        for i, (val, pf_status, lot_str) in enumerate(m['raw_data']):
                             r_idx = i + 1
                             style_cell(table.cell(r_idx, 0), str(i + 1))
-                            style_cell(table.cell(r_idx, 2), "-")
+                            style_cell(table.cell(r_idx, 2), lot_str) # Lot 시트에서 가져온 값 매핑!
                             style_cell(table.cell(r_idx, 4), f"{val:g}") 
                             style_cell(table.cell(r_idx, 5), pf_status)
                             
-                        # 빈 줄 없이 깔끔하게 병합 후 텍스트 지정 
                         if num_samples > 1:
                             cell_art = table.cell(1, 1).merge(table.cell(num_samples, 1))
                             cell_crit = table.cell(1, 3).merge(table.cell(num_samples, 3))
@@ -441,7 +488,7 @@ with tab1:
                 st.download_button("📄 고급 워드(Word) 보고서 다운로드", data=docx_buffer, file_name="스텐트_보고서_최종.docx", use_container_width=True)
 
 # =========================================================
-# 탭 2: 신규 데이터 생성기 코드
+# 탭 2: 신규 데이터 생성기 코드 (기존과 동일)
 # =========================================================
 with tab2:
     st.markdown("### 🎲 원하는 평균/표준편차로 데이터 추출")
@@ -466,7 +513,7 @@ with tab2:
             adjusted_data = (raw_data - current_mean) / current_std
             final_data = (adjusted_data * target_std) + target_mean
             final_data = np.round(final_data, int(decimals))
-            data_dict[f"Set_{i+1}"] = final_data
+            data_dict[f"Model_{i+1}"] = final_data
             
         df = pd.DataFrame(data_dict)
         
