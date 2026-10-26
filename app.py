@@ -12,8 +12,9 @@ from statsmodels.stats.diagnostic import normal_ad
 import io
 import re
 
-# 워드(Word) 생성을 위한 라이브러리 (템플릿 없이 직접 그림)
+# 워드(Word) 생성을 위한 라이브러리
 from docx import Document
+from docx.shared import Pt  # 폰트 사이즈 지정을 위해 추가
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_ALIGN_VERTICAL
 from docx.oxml.ns import nsdecls
@@ -30,6 +31,8 @@ def style_cell(cell, text, bg_color=None, bold=False):
     for p in cell.paragraphs:
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         for run in p.runs:
+            run.font.name = 'Times New Roman'  # 폰트 강제 지정
+            run.font.size = Pt(9)              # 사이즈 9 강제 지정
             run.font.bold = bold
     cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
 
@@ -349,14 +352,29 @@ with tab1:
             wb.save(excel_buffer)
             excel_buffer.seek(0)
             
-            # [2] 고급 워드 보고서 생성 (파이썬 코딩 방식, 글자 중복 완벽 해결 버전)
+            # [2] 고급 워드 보고서 생성 (전체 폰트 Times New Roman, 사이즈 9 고정)
             doc = Document()
-            doc.add_heading('스텐트 성능 및 치수 시험 보고서', 0)
+            
+            # 문서 전체 기본 폰트 설정
+            style = doc.styles['Normal']
+            font = style.font
+            font.name = 'Times New Roman'
+            font.size = Pt(9)
+            
+            # 제목용 스타일 강제 설정
+            title_p = doc.add_heading('스텐트 성능 및 치수 시험 보고서', 0)
+            for run in title_p.runs:
+                run.font.name = 'Times New Roman'
+                run.font.size = Pt(9)
             
             for main_name, sub_tests in report_data.items():
                 for test_name, models in sub_tests.items():
                     if not models: continue
-                    doc.add_heading(f"■ {main_name} - {test_name}", level=2)
+                    
+                    sub_title = doc.add_heading(f"■ {main_name} - {test_name}", level=2)
+                    for run in sub_title.runs:
+                        run.font.name = 'Times New Roman'
+                        run.font.size = Pt(9)
                     
                     for m in models:
                         num_samples = len(m['raw_data'])
@@ -372,7 +390,7 @@ with tab1:
                         for i, h_text in enumerate(headers):
                             style_cell(table.cell(0, i), h_text, bg_color="D9E1F2", bold=True)
                             
-                        # 2. 로우 데이터 작성 (병합될 셀에는 첫 번째 행에만 글씨 쓰기)
+                        # 2. 로우 데이터 작성
                         for i, (val, pf_status) in enumerate(m['raw_data']):
                             r_idx = i + 1
                             style_cell(table.cell(r_idx, 0), str(i + 1))
@@ -380,7 +398,7 @@ with tab1:
                             style_cell(table.cell(r_idx, 4), f"{val:g}") 
                             style_cell(table.cell(r_idx, 5), pf_status)
                             
-                            # 병합할 열(Art no, Criteria)은 첫 번째 칸에만 쓰고 나머지는 빈칸 유지
+                            # 병합할 열은 첫 번째 칸에만 씀
                             if i == 0:
                                 style_cell(table.cell(r_idx, 1), m['model'])
                                 style_cell(table.cell(r_idx, 3), m['criteria'])
