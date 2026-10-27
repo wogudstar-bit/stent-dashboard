@@ -36,8 +36,51 @@ def style_cell(cell, text, bg_color=None, bold=False):
             run.font.bold = bold
     cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
 
-st.set_page_config(page_title="스텐트 성능 분석", layout="wide")
-st.title("📊 스텐트 자동 분석 & 데이터 생성 대시보드")
+# ---------------------------------------------------------
+# ✨ 여기서부터 화면 꾸미기(UI) 코드가 새롭게 들어갑니다!
+# ---------------------------------------------------------
+st.set_page_config(page_title="스텐트 스마트 QC", page_icon="🧬", layout="wide")
+
+# 1. 좌측 사이드바(Sidebar) 구성
+with st.sidebar:
+    st.markdown("## 🧬 Smart QC System")
+    st.caption("스텐트 품질 통계 분석 자동화 플랫폼")
+    st.divider()
+    st.markdown("### 📊 **주요 지원 기능**")
+    st.markdown("- 치수/성능 공차 자동 판정\n- K-value (LTL/UTL) 연산\n- p-value 정규성 검정\n- Minitab 스타일 차트 렌더링\n- 사내 규격 워드 보고서 출력")
+    st.divider()
+    st.markdown("👨‍💻 **Developed Process**")
+    st.info("AI (Google Gemini) 기반\n페어 프로그래밍으로 자체 구축")
+
+# 2. 메인 화면 배너 및 제목
+st.markdown("""
+<div style='background-color: #e6f0fa; padding: 1.5rem; border-radius: 10px; margin-bottom: 1.5rem;'>
+    <h2 style='text-align: center; color: #0055a4; margin-bottom: 0.5rem;'>🚀 스텐트 자동 분석 & 스마트 보고서 대시보드</h2>
+    <p style='text-align: center; font-size: 1.1rem; color: #333; margin-top: 0;'>
+        엑셀 파일 하나로 정규성 검정부터 통계 시각화, 품질 규격 워드 문서까지 단 5초 만에 완성하세요.
+    </p>
+</div>
+""", unsafe_allow_html=True)
+
+# 3. 탭 구성
+tab1, tab2 = st.tabs(["📊 품질 데이터 자동 분석기", "🎲 가상 시험 데이터 생성기 (시뮬레이터)"])
+
+with tab1:
+    # 4. 사용 방법 3단계 카드형 안내 (엑셀 업로드 창 바로 위)
+    st.markdown("#### 💡 시스템 사용 방법")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.info("**STEP 1. 데이터 준비**\n\n기준값(criteria)과 시험 결과값이 포함된 엑셀 파일을 준비합니다.")
+    with col2:
+        st.warning("**STEP 2. 파일 업로드**\n\n아래 점선 영역에 엑셀 파일을 마우스로 끌어다 놓습니다.")
+    with col3:
+        st.success("**STEP 3. 결과 다운로드**\n\n분석 엑셀과 통계 그래프가 삽입된 워드 보고서를 다운로드합니다.")
+    
+    st.divider() # 구분선
+
+    pink_fill = PatternFill(start_color="FFC0CB", end_color="FFC0CB", fill_type="solid")
+
+    # (이 아래로는 기존 def parse_criteria(crit_str): 부터 끝까지 동일하게 유지하시면 됩니다!)
 
 tab1, tab2 = st.tabs(["📊 데이터 분석기", "🎲 임의 데이터 생성기"])
 
