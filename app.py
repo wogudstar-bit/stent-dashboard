@@ -183,8 +183,8 @@ with tab1:
     """, unsafe_allow_html=True)
 
 # 엑셀 파일 업로드 창 (사진과 동일한 두 줄 안내 문구 적용)
-upload_text = "검사 결과 엑셀 파일(빈 양식 또는 데이터 기입본)을 이곳에 끌어다 놓으세요.\n\n치수 검사 및 성능 시험(K값/p값) 시트와 Lot 시트가 포함된 .xlsx 파일을 자동으로 분석합니다."
-uploaded_file = st.file_uploader(upload_text, type=['xlsx'])
+    upload_text = "검사 결과 엑셀 파일(빈 양식 또는 데이터 기입본)을 이곳에 끌어다 놓으세요.\n\n치수 검사 및 성능 시험(K값/p값) 시트와 Lot 시트가 포함된 .xlsx 파일을 자동으로 분석합니다."
+    uploaded_file = st.file_uploader(upload_text, type=['xlsx'])
     if uploaded_file is not None:
         wb = openpyxl.load_workbook(uploaded_file)
         ws = wb.active
