@@ -11,7 +11,6 @@ import scipy.stats as stats
 from statsmodels.stats.diagnostic import normal_ad
 import io
 import re
-import google.generativeai as genai # ✨ 제미나이 라이브러리 추가
 
 # 워드(Word) 생성을 위한 라이브러리
 from docx import Document
@@ -20,10 +19,6 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_ALIGN_VERTICAL
 from docx.oxml.ns import nsdecls
 from docx.oxml import parse_xml
-
-# ✨ 제미나이 API 키 설정 (발급받은 키를 " " 사이에 넣으세요)
-genai.configure(api_key="GEMINI_API_KEY")
-gemini_model = genai.GenerativeModel('gemini-1.5-flash')
 
 def set_cell_bg(cell, fill="D9E1F2"):
     shading_elm = parse_xml(r'<w:shd {} w:fill="{}"/>'.format(nsdecls('w'), fill))
@@ -128,6 +123,7 @@ with tab1:
         ax4.text(0.1, 0.95, stats_text, va='top', ha='left', fontsize=9, family='monospace')
         plt.tight_layout()
         
+        # ✨ 엑셀/워드 충돌 방지를 위해 이미지 바이트(Raw Data)로 복사해서 추출
         img_buffer = io.BytesIO()
         plt.savefig(img_buffer, format='png', dpi=150)
         img_bytes = img_buffer.getvalue()
@@ -310,7 +306,7 @@ with tab1:
                             "mean_str": fmt_val(mean_val),
                             "std_str": fmt_val(std_val),
                             "raw_data": [],
-                            "plot_bytes": None
+                            "plot_bytes": None # 에러 방지용 바이트 저장 변수
                         }
 
                         if is_dimensional:
@@ -405,9 +401,11 @@ with tab1:
                             result_dict["k_val_str"] = bound_text
                             result_dict["p_val_str"] = f"{p_val:.3f}"
 
+                            # ✨ 복사본(Bytes)을 생성하여 전달
                             fig, img_bytes = create_minitab_plot(np.array(data), model_name)
                             result_dict["plot_bytes"] = img_bytes
                             
+                            # 엑셀에는 복사본 A를 전달
                             img_for_excel = OpenpyxlImage(io.BytesIO(img_bytes))
                             img_for_excel.width, img_for_excel.height = int(9.6 * 37.8), int(6.2 * 37.8)
                             c_letter = get_column_letter(img_insert_col)
@@ -430,7 +428,9 @@ with tab1:
             wb.save(excel_buffer)
             excel_buffer.seek(0)
             
+            # [2] 고급 워드 보고서 생성
             doc = Document()
+            
             style = doc.styles['Normal']
             font = style.font
             font.name = 'Times New Roman'
@@ -452,8 +452,10 @@ with tab1:
                         run.font.name = 'Times New Roman'
                         run.font.size = Pt(9)
                     
+                    # --- 1. 텍스트 결과 표 작성 ---
                     for m in models:
                         num_samples = len(m['raw_data'])
+                        
                         summary_rows_count = 4 if is_perf_test else 2
                         total_rows = 1 + num_samples + summary_rows_count
                         table = doc.add_table(rows=total_rows, cols=6)
@@ -498,6 +500,7 @@ with tab1:
                             
                         doc.add_paragraph()
                         
+                    # --- 2. 통계 그래프 표 삽입 (성능 시험일 경우에만) ---
                     if is_perf_test:
                         stat_title = doc.add_heading(f"Statistical analysis ({test_name})", level=3)
                         for run in stat_title.runs:
@@ -506,6 +509,7 @@ with tab1:
                             
                         num_plots = len(models)
                         num_rows = (num_plots + 1) // 2
+                        
                         img_table = doc.add_table(rows=num_rows, cols=2)
                         
                         plot_idx = 0
@@ -513,7 +517,9 @@ with tab1:
                             for col_idx in range(2):
                                 if plot_idx < num_plots:
                                     cell = img_table.cell(row_idx, col_idx)
+                                    # ✨ 워드에는 복사본 B를 전달 (io.BytesIO로 새로 감싸서 전달)
                                     img_buf = io.BytesIO(models[plot_idx]["plot_bytes"])
+                                    
                                     p = cell.paragraphs[0]
                                     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                                     run = p.add_run()
@@ -526,17 +532,6 @@ with tab1:
             docx_buffer.seek(0)
 
             st.markdown("### 🎉 분석 완료!")
-            
-            # ✨ 3. 화면 하단 AI 총평 작성 버튼 추가
-            st.markdown("#### 🤖 AI 시험 결과 총평")
-            if st.button("보고서용 코멘트 자동 작성"):
-                prompt = "스텐트 성능 시험 결과 분석이 완료되었습니다. 품질 관리자 관점에서 전문적인 보고서용 1문장 요약(정상 통과 기준)을 작성해 주세요."
-                try:
-                    response = gemini_model.generate_content(prompt)
-                    st.info(response.text)
-                except Exception as e:
-                    st.error(f"AI 호출 중 에러가 발생했습니다: {e}")
-
             dl_col1, dl_col2 = st.columns(2)
             with dl_col1:
                 st.download_button("📊 결과 엑셀 다운로드", data=excel_buffer, file_name="스텐트_전체성능분석_완료.xlsx", use_container_width=True)
