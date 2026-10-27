@@ -167,20 +167,20 @@ with tab1:
         return fig, img_bytes
 
     # ✨ 업로드 박스 디자인 커스텀 (점선 테두리, 둥근 모서리, 배경색 적용)
-st.markdown("""
-    <style>
-    [data-testid="stFileUploadDropzone"] {
-        border: 2px dashed #b0c4de !important;
-        border-radius: 15px !important;
-        background-color: #fcfcfc !important;
-        padding: 3rem !important;
-    }
-    [data-testid="stFileUploadDropzone"]:hover {
-        border-color: #1a66ff !important;
-        background-color: #f0f6ff !important;
-    }
-    </style>
-""", unsafe_allow_html=True)
+    st.markdown("""
+        <style>
+        [data-testid="stFileUploadDropzone"] {
+            border: 2px dashed #b0c4de !important;
+            border-radius: 15px !important;
+            background-color: #fcfcfc !important;
+            padding: 3rem !important;
+        }
+        [data-testid="stFileUploadDropzone"]:hover {
+            border-color: #1a66ff !important;
+            background-color: #f0f6ff !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
 
 # 엑셀 파일 업로드 창 (사진과 동일한 두 줄 안내 문구 적용)
 upload_text = "검사 결과 엑셀 파일(빈 양식 또는 데이터 기입본)을 이곳에 끌어다 놓으세요.\n\n치수 검사 및 성능 시험(K값/p값) 시트와 Lot 시트가 포함된 .xlsx 파일을 자동으로 분석합니다."
