@@ -75,14 +75,13 @@ with col3:
 st.divider() 
 
 # 4. 탭 구성 (중복 제거 및 이름 변경)
-tab1, tab2 = st.tabs(["📊 성능 데이터 분석기", "🎲 임의 데이터 생성기"])
 
 with tab1:
     pink_fill = PatternFill(start_color="FFC0CB", end_color="FFC0CB", fill_type="solid")
 
     # (이 아래로는 기존 def parse_criteria(crit_str): 부터 끝까지 동일하게 유지하시면 됩니다!)
 
-tab1, tab2 = st.tabs(["📊 데이터 분석기", "🎲 임의 데이터 생성기"])
+tab1, tab2 = st.tabs(["📊 성능 데이터 분석기", "🎲 임의 데이터 생성기"])
 
 with tab1:
     pink_fill = PatternFill(start_color="FFC0CB", end_color="FFC0CB", fill_type="solid")
