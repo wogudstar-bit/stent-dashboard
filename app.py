@@ -57,7 +57,7 @@ st.markdown("""
 <div style='background-color: #e6f0fa; padding: 1.5rem; border-radius: 10px; margin-bottom: 1.5rem;'>
     <h2 style='text-align: center; color: #0055a4; margin-bottom: 0.5rem;'>🚀 스텐트 자동 분석 & 스마트 보고서 대시보드</h2>
     <p style='text-align: center; font-size: 1.1rem; color: #333; margin-top: 0;'>
-        엑셀 파일 하나로 정규성 검정부터 통계 시각화, 품질 규격 워드 문서까지 단 5초 만에 완성하세요.
+        엑셀 파일 하나로 정규성 검정부터 통계 시각화, 규격 보고서 워드 문서까지 단 5초 만에 완성하세요.
     </p>
 </div>
 """, unsafe_allow_html=True)
