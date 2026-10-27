@@ -62,22 +62,22 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# 3. 탭 구성
-tab1, tab2 = st.tabs(["📊 품질 데이터 자동 분석기", "🎲 가상 시험 데이터 생성기 (시뮬레이터)"])
+# 3. 사용 방법 3단계 카드형 안내
+st.markdown("#### 💡 시스템 사용 방법")
+col1, col2, col3 = st.columns(3)
+with col1:
+    st.info("**STEP 1. 데이터 준비**\n\n기준값(criteria)과 시험 결과값이 포함된 엑셀 파일을 준비합니다.")
+with col2:
+    st.warning("**STEP 2. 파일 업로드**\n\n아래 점선 영역에 엑셀 파일을 마우스로 끌어다 놓습니다.")
+with col3:
+    st.success("**STEP 3. 결과 다운로드**\n\n분석 엑셀과 통계 그래프가 삽입된 워드 보고서를 다운로드합니다.")
+
+st.divider() 
+
+# 4. 탭 구성 (중복 제거 및 이름 변경)
+tab1, tab2 = st.tabs(["📊 성능 데이터 분석기", "🎲 임의 데이터 생성기"])
 
 with tab1:
-    # 4. 사용 방법 3단계 카드형 안내 (엑셀 업로드 창 바로 위)
-    st.markdown("#### 💡 시스템 사용 방법")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.info("**STEP 1. 데이터 준비**\n\n기준값(criteria)과 시험 결과값이 포함된 엑셀 파일을 준비합니다.")
-    with col2:
-        st.warning("**STEP 2. 파일 업로드**\n\n아래 점선 영역에 엑셀 파일을 마우스로 끌어다 놓습니다.")
-    with col3:
-        st.success("**STEP 3. 결과 다운로드**\n\n분석 엑셀과 통계 그래프가 삽입된 워드 보고서를 다운로드합니다.")
-    
-    st.divider() # 구분선
-
     pink_fill = PatternFill(start_color="FFC0CB", end_color="FFC0CB", fill_type="solid")
 
     # (이 아래로는 기존 def parse_criteria(crit_str): 부터 끝까지 동일하게 유지하시면 됩니다!)
